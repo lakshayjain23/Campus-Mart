@@ -14,8 +14,10 @@ import {
   Package,
   Plus,
   Check,
+  LogOut,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { useAuth } from '../context/AuthContext';
 import { CATEGORIES } from '../data/mockProducts';
 
 export const Navbar: React.FC = () => {
@@ -29,6 +31,7 @@ export const Navbar: React.FC = () => {
     searchQuery,
     setSearchQuery,
   } = useMarketplace();
+  const { user, profile, signOut, openAuthModal } = useAuth();
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -43,10 +46,21 @@ export const Navbar: React.FC = () => {
   const catRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  // Synchronize local search with global
-  useEffect(() => {
+  // Synchronize local search with global without effect cascading renders
+  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
+  if (searchQuery !== prevSearchQuery) {
+    setPrevSearchQuery(searchQuery);
     setLocalSearch(searchQuery);
-  }, [searchQuery]);
+  }
+
+  // Close mobile drawer on route change without effect cascading renders
+  const [prevPathname, setPrevPathname] = useState(location.pathname);
+  if (location.pathname !== prevPathname) {
+    setPrevPathname(location.pathname);
+    if (mobileMenuOpen) {
+      setMobileMenuOpen(false);
+    }
+  }
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -64,11 +78,6 @@ export const Navbar: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // Close mobile drawer on route change
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,51 +312,90 @@ export const Navbar: React.FC = () => {
             </Link>
 
             {/* User Profile dropdown */}
-            <div className="relative hidden md:block" ref={profileRef}>
+            {/* User Profile / Auth Button */}
+            {user ? (
+              <div className="relative hidden md:block" ref={profileRef}>
+                <button
+                  type="button"
+                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                  className="flex items-center gap-2 p-1 pl-2 rounded-full border border-slate-200 hover:border-emerald-400 bg-slate-50 transition-colors cursor-pointer"
+                >
+                  <span className="text-xs font-semibold text-slate-700 truncate max-w-[100px]">
+                    {profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}
+                  </span>
+                  <div className="w-7 h-7 rounded-full bg-[#064E3B] text-white flex items-center justify-center font-bold text-xs">
+                    {profile?.full_name ? profile.full_name[0].toUpperCase() : (user.email?.[0].toUpperCase() || 'S')}
+                  </div>
+                </button>
+
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-4 py-2.5 border-b border-slate-100">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {profile?.full_name || 'Campus Student'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+                      <span className="inline-block mt-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        {profile?.college || selectedCampus.split(' - ')[0]}
+                      </span>
+                    </div>
+
+                    <Link
+                      to="/dashboard"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="block px-4 py-2 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 font-semibold"
+                    >
+                      Seller Dashboard
+                    </Link>
+                    <Link
+                      to="/orders"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="block px-4 py-2 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 font-semibold"
+                    >
+                      My Orders & Enquiries
+                    </Link>
+                    <Link
+                      to="/wishlist"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="block px-4 py-2 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 font-semibold"
+                    >
+                      Saved Items ({wishlistCount})
+                    </Link>
+
+                    <div className="border-t border-slate-100 mt-1 pt-1">
+                      <button
+                        onClick={() => {
+                          setProfileDropdownOpen(false);
+                          setIsCollegeModalOpen(true);
+                        }}
+                        className="w-full text-left px-4 py-1.5 text-xs text-slate-600 hover:bg-slate-50 font-medium"
+                      >
+                        Change College ({selectedCampus.split(' - ')[0]})
+                      </button>
+                      <button
+                        onClick={() => {
+                          setProfileDropdownOpen(false);
+                          signOut();
+                        }}
+                        className="w-full text-left px-4 py-1.5 text-xs text-red-600 hover:bg-red-50 font-semibold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-                className="flex items-center gap-1.5 p-1 rounded-full border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
+                onClick={() => openAuthModal('signin')}
+                className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 transition-colors cursor-pointer"
               >
-                <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
-                  <User className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-emerald-800" />
-                </div>
+                <User className="w-3.5 h-3.5" />
+                <span>Sign In</span>
               </button>
-
-              {profileDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-4 py-2 border-b border-slate-100">
-                    <p className="text-xs font-semibold text-slate-900">Student Account</p>
-                    <p className="text-[11px] text-slate-500 truncate">demo.student@campus.edu</p>
-                  </div>
-                  <Link
-                    to="/sell"
-                    onClick={() => setProfileDropdownOpen(false)}
-                    className="block px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium"
-                  >
-                    My Active Listings
-                  </Link>
-                  <Link
-                    to="/wishlist"
-                    onClick={() => setProfileDropdownOpen(false)}
-                    className="block px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium"
-                  >
-                    Saved Items
-                  </Link>
-                  <div className="border-t border-slate-100 mt-1 pt-1">
-                    <button
-                      onClick={() => {
-                        setProfileDropdownOpen(false);
-                        setIsCollegeModalOpen(true);
-                      }}
-                      className="w-full text-left px-4 py-1.5 text-xs text-emerald-800 hover:bg-emerald-50 font-semibold"
-                    >
-                      Change College ({selectedCampus.split(' - ')[0]})
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Mobile menu toggle */}
             <button
@@ -407,21 +455,81 @@ export const Navbar: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex flex-col space-y-2 pt-2 border-t border-slate-100">
+          {/* User Account Section Mobile */}
+          <div className="pt-2 border-t border-slate-100">
+            {user ? (
+              <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100 space-y-2 mb-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-[#064E3B] text-white flex items-center justify-center font-bold text-xs">
+                    {profile?.full_name ? profile.full_name[0].toUpperCase() : 'S'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-slate-900 truncate">
+                      {profile?.full_name || 'Student Account'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Link
+                    to="/dashboard"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="py-1.5 px-2 bg-white rounded-lg text-center text-xs font-semibold text-emerald-800 border border-emerald-200"
+                  >
+                    Dashboard
+                  </Link>
+                  <Link
+                    to="/orders"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="py-1.5 px-2 bg-white rounded-lg text-center text-xs font-semibold text-slate-700 border border-slate-200"
+                  >
+                    My Orders
+                  </Link>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    signOut();
+                  }}
+                  className="w-full text-center text-[11px] text-red-600 font-semibold pt-1"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  openAuthModal('signin');
+                }}
+                className="w-full py-2.5 px-4 bg-[#064E3B] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 mb-2 shadow-xs cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Sign In / Create Account</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-col space-y-2 pt-1 border-t border-slate-100">
             <Link
               to="/"
+              onClick={() => setMobileMenuOpen(false)}
               className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg"
             >
               Home
             </Link>
             <Link
               to="/explore"
+              onClick={() => setMobileMenuOpen(false)}
               className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg"
             >
               Explore Marketplace
             </Link>
             <Link
               to="/sell"
+              onClick={() => setMobileMenuOpen(false)}
               className="px-3 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 rounded-lg flex items-center justify-between"
             >
               <span>Sell an Item</span>
@@ -429,6 +537,7 @@ export const Navbar: React.FC = () => {
             </Link>
             <Link
               to="/wishlist"
+              onClick={() => setMobileMenuOpen(false)}
               className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg flex items-center justify-between"
             >
               <span>Wishlist</span>
@@ -440,6 +549,7 @@ export const Navbar: React.FC = () => {
             </Link>
             <Link
               to="/cart"
+              onClick={() => setMobileMenuOpen(false)}
               className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg flex items-center justify-between"
             >
               <span>Cart</span>

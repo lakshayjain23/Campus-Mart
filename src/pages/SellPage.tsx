@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -11,14 +11,19 @@ import {
   Trash2,
   Plus,
   Database,
+  Loader2,
+  Lock,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { useAuth } from '../context/AuthContext';
+import { uploadProductImage } from '../lib/supabase';
 import type { Condition, Product } from '../types/product';
 import { CATEGORIES } from '../data/mockProducts';
 import { ProductCard } from '../components/ProductCard';
 
 export const SellPage: React.FC = () => {
   const { addProduct, campuses, addCampus, selectedCampus } = useMarketplace();
+  const { user, profile, openAuthModal } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,19 +43,32 @@ export const SellPage: React.FC = () => {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [imageFileName, setImageFileName] = useState<string>('');
   const [imageFileSize, setImageFileSize] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [useUrlMode, setUseUrlMode] = useState<boolean>(false);
 
   // Campus & Handover Details
   const defaultCampus = selectedCampus !== 'All Campuses' ? selectedCampus : (campuses.find(c => c !== 'All Campuses') || 'IIT Delhi - Main Campus');
-  const [campus, setCampus] = useState(defaultCampus);
+  const [campus, setCampus] = useState(() => profile?.college || defaultCampus);
   const [showAddCampusInline, setShowAddCampusInline] = useState(false);
   const [newCampusInput, setNewCampusInput] = useState('');
-  const [hostel, setHostel] = useState('');
+  const [hostel, setHostel] = useState(() => profile?.hostel || '');
   const [pickupLocation, setPickupLocation] = useState('');
-  const [sellerName, setSellerName] = useState('');
-  const [department, setDepartment] = useState('');
-  const [year, setYear] = useState('3rd Year');
+  const [sellerName, setSellerName] = useState(() => profile?.full_name || '');
+  const [department, setDepartment] = useState(() => profile?.department || '');
+  const [year, setYear] = useState(() => profile?.year || '3rd Year');
+
+  // Adjust state during render when profile loads
+  const [syncedProfileId, setSyncedProfileId] = useState<string | null>(null);
+  if (profile && profile.id !== syncedProfileId) {
+    setSyncedProfileId(profile.id);
+    if (profile.full_name && !sellerName) setSellerName(profile.full_name);
+    if (profile.college && !campus) setCampus(profile.college);
+    if (profile.department && !department) setDepartment(profile.department);
+    if (profile.year && !year) setYear(profile.year);
+    if (profile.hostel && !hostel) setHostel(profile.hostel);
+  }
 
   // Error validation
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -62,25 +80,21 @@ export const SellPage: React.FC = () => {
       return;
     }
 
-    if (file.size > 12 * 1024 * 1024) {
-      setErrors((prev) => ({ ...prev, image: 'Image size should be under 12MB.' }));
+    if (file.size > 8 * 1024 * 1024) {
+      setErrors((prev) => ({ ...prev, image: 'Image size should be under 8MB.' }));
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      if (e.target?.result) {
-        setImageUrl(e.target.result as string);
-        setImageFileName(file.name);
-        setImageFileSize(`${(file.size / (1024 * 1024)).toFixed(2)} MB`);
-        setErrors((prev) => {
-          const newErrs = { ...prev };
-          delete newErrs.image;
-          return newErrs;
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+    setSelectedFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setImageUrl(objectUrl);
+    setImageFileName(file.name);
+    setImageFileSize(`${(file.size / (1024 * 1024)).toFixed(2)} MB`);
+    setErrors((prev) => {
+      const newErrs = { ...prev };
+      delete newErrs.image;
+      return newErrs;
+    });
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,45 +180,64 @@ export const SellPage: React.FC = () => {
     setCurrentStep((prev) => Math.max(1, prev - 1));
   };
 
-  const handlePublish = (e: React.FormEvent) => {
+  const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const tags = tagsInput
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    if (!user) {
+      openAuthModal('signin');
+      return;
+    }
 
-    const newProd = addProduct({
-      title,
-      description,
-      price: Number(price),
-      originalPrice: originalPrice ? Number(originalPrice) : undefined,
-      category,
-      condition,
-      images: [imageUrl],
-      campus,
-      pickupLocation,
-      tags: tags.length ? tags : ['CampusDeal', 'StudentVerified'],
-      seller: {
-        id: `seller-${Date.now()}`,
-        name: sellerName || 'Campus Student',
-        department: department || 'Engineering',
-        year: year || '3rd Year',
-        hostel: hostel || 'Hostel Campus',
-        rating: 5.0,
-        reviewsCount: 1,
-        verifiedStudent: true,
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        responseTime: 'Under 15 mins',
+    setIsPublishing(true);
+
+    try {
+      let finalImageUrl = imageUrl;
+      if (selectedFile) {
+        finalImageUrl = await uploadProductImage(selectedFile, user.id);
+      }
+
+      const tags = tagsInput
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const newProd = addProduct({
+        title,
+        description,
+        price: Number(price),
+        originalPrice: originalPrice ? Number(originalPrice) : undefined,
+        category,
+        condition,
+        images: [finalImageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
         campus,
-      },
-    });
+        pickupLocation,
+        tags: tags.length ? tags : ['CampusDeal', 'StudentVerified'],
+        seller: {
+          id: user.id,
+          name: profile?.full_name || sellerName || user.email?.split('@')[0] || 'Campus Student',
+          department: department || profile?.department || 'Engineering',
+          year: year || profile?.year || '3rd Year',
+          hostel: hostel || profile?.hostel || 'Hostel',
+          rating: 5.0,
+          reviewsCount: 1,
+          verifiedStudent: true,
+          avatarUrl: profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+          responseTime: 'Under 15 mins',
+          campus,
+        },
+      });
 
-    setCreatedProduct(newProd);
+      setCreatedProduct(newProd);
+    } catch (err: any) {
+      console.error('Publish error:', err);
+      alert(`Could not publish listing: ${err?.message || 'Please try again.'}`);
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
-  // Preview dummy object
-  const previewProduct: Product = {
+  // Preview dummy object memoized to avoid impure render date execution
+  const previewProduct: Product = useMemo(() => ({
     id: 'preview-temp',
     title: title || 'Untitled Product',
     description: description || 'No description provided.',
@@ -216,21 +249,38 @@ export const SellPage: React.FC = () => {
     campus,
     pickupLocation: pickupLocation || 'Campus Hub',
     tags: tagsInput.split(',').filter(Boolean),
-    createdAt: new Date().toISOString().split('T')[0],
+    createdAt: 'Today',
     seller: {
-      id: 'preview-seller',
-      name: sellerName || 'Your Name',
+      id: user?.id || 'preview-seller',
+      name: profile?.full_name || sellerName || 'Your Name',
       department: department || 'Branch',
       year: year || '3rd Year',
       hostel: hostel || 'Hostel',
       rating: 5.0,
       reviewsCount: 0,
       verifiedStudent: true,
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      avatarUrl: profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
       responseTime: 'Under 15 mins',
       campus,
     },
-  };
+  }), [
+    title,
+    description,
+    price,
+    originalPrice,
+    category,
+    condition,
+    imageUrl,
+    campus,
+    pickupLocation,
+    tagsInput,
+    sellerName,
+    department,
+    year,
+    hostel,
+    user,
+    profile,
+  ]);
 
   // SUCCESS STATE
   if (createdProduct) {
@@ -821,10 +871,25 @@ export const SellPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handlePublish}
-                className="px-7 py-3 rounded-full bg-[#15803D] hover:bg-[#064E3B] text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
+                disabled={isPublishing}
+                className="px-7 py-3 rounded-full bg-[#15803D] hover:bg-[#064E3B] disabled:opacity-60 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
               >
-                <Sparkles className="w-4 h-4 text-[#22C55E]" />
-                <span>Publish Listing Now</span>
+                {isPublishing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
+                    <span>Uploading & Publishing...</span>
+                  </>
+                ) : !user ? (
+                  <>
+                    <Lock className="w-4 h-4 text-emerald-200" />
+                    <span>Sign In to Publish</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-[#22C55E]" />
+                    <span>Publish Listing to Supabase</span>
+                  </>
+                )}
               </button>
             )}
           </div>

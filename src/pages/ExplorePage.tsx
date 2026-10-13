@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Search,
@@ -39,13 +39,15 @@ export const ExplorePage: React.FC = () => {
   const [mobileFilterOpen, setMobileFilterOpen] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState<number>(8);
 
-  // Update query params when category or search changes
-  useEffect(() => {
-    const cat = searchParams.get('category');
-    if (cat) {
-      setCategoryFilter(cat);
+  // Adjust state during render when searchParams category changes
+  const paramCategory = searchParams.get('category');
+  const [prevParamCategory, setPrevParamCategory] = useState(paramCategory);
+  if (paramCategory !== prevParamCategory) {
+    setPrevParamCategory(paramCategory);
+    if (paramCategory) {
+      setCategoryFilter(paramCategory);
     }
-  }, [searchParams]);
+  }
 
   const handleClearFilters = () => {
     setCategoryFilter('All');

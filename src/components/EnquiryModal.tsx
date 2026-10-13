@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Send, CheckCircle2, ShieldCheck, MapPin, Clock, Loader2, Database, AlertCircle } from 'lucide-react';
 import type { Product } from '../types/product';
 import { submitProductEnquiry } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 interface EnquiryModalProps {
   product: Product;
@@ -17,6 +18,7 @@ const QUICK_MESSAGES = [
 ];
 
 export const EnquiryModal: React.FC<EnquiryModalProps> = ({ product, isOpen, onClose }) => {
+  const { user, profile } = useAuth();
   const [message, setMessage] = useState('');
   const [preferredMeetup, setPreferredMeetup] = useState(product.pickupLocation);
   const [shareContactConsent, setShareContactConsent] = useState(true);
@@ -40,6 +42,9 @@ export const EnquiryModal: React.FC<EnquiryModalProps> = ({ product, isOpen, onC
         productPrice: product.price,
         sellerId: product.seller.id,
         sellerName: product.seller.name,
+        buyerId: user?.id,
+        buyerName: profile?.full_name || user?.email?.split('@')[0],
+        buyerEmail: user?.email,
         message: message.trim(),
         preferredMeetup: preferredMeetup.trim(),
         shareContactConsent,

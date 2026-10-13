@@ -16,10 +16,12 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { useAuth } from '../context/AuthContext';
 import { submitReservation } from '../lib/supabase';
 
 export const CartPage: React.FC = () => {
   const { cart, removeFromCart, updateCartQuantity, clearCart, cartTotal, selectedCampus } = useMarketplace();
+  const { user, profile } = useAuth();
 
   const [pickupSlot, setPickupSlot] = useState('Today 5:00 PM - SAC / Central Canteen');
   const [confirmedModalOpen, setConfirmedModalOpen] = useState(false);
@@ -47,6 +49,9 @@ export const CartPage: React.FC = () => {
         totalAmount: cartTotal,
         campus: selectedCampus,
         pickupSlot,
+        buyerId: user?.id,
+        buyerName: profile?.full_name || user?.email?.split('@')[0],
+        buyerEmail: user?.email,
       });
 
       if (saved && saved.id) {
@@ -55,8 +60,7 @@ export const CartPage: React.FC = () => {
       setConfirmedModalOpen(true);
     } catch (err: any) {
       console.error('Reservation error:', err);
-      // Even if offline, show confirmed modal with fallback
-      setConfirmedModalOpen(true);
+      setCheckoutError(err?.message || 'Could not place reservation. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -292,12 +296,21 @@ export const CartPage: React.FC = () => {
               <p>• Total Amount: <strong className="text-slate-800">₹{cartTotal.toLocaleString('en-IN')}</strong></p>
               <p className="text-emerald-700 font-semibold text-[11px]">✓ Stored in Supabase reservations table</p>
             </div>
-            <button
-              onClick={handleFinish}
-              className="w-full py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
-            >
-              Back to Marketplace
-            </button>
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+              <Link
+                to="/orders"
+                onClick={handleFinish}
+                className="w-full sm:w-1/2 py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-semibold rounded-xl shadow-xs transition-colors text-center"
+              >
+                View in My Orders
+              </Link>
+              <button
+                onClick={handleFinish}
+                className="w-full sm:w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                Back to Marketplace
+              </button>
+            </div>
           </div>
         </div>
       )}

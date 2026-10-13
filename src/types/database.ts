@@ -65,6 +65,9 @@ export type Database = {
       }
       product_enquiries: {
         Row: {
+          buyer_id: string | null
+          buyer_name: string | null
+          buyer_email: string | null
           created_at: string | null
           id: string
           message: string
@@ -78,6 +81,9 @@ export type Database = {
           status: string | null
         }
         Insert: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          buyer_email?: string | null
           created_at?: string | null
           id?: string
           message: string
@@ -91,6 +97,9 @@ export type Database = {
           status?: string | null
         }
         Update: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          buyer_email?: string | null
           created_at?: string | null
           id?: string
           message?: string
@@ -189,8 +198,63 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles: {
+        Row: {
+          id: string
+          email: string
+          full_name: string | null
+          college: string | null
+          department: string | null
+          year: string | null
+          hostel: string | null
+          phone: string | null
+          avatar_url: string | null
+          verified_student: boolean | null
+          rating: number | null
+          reviews_count: number | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id: string
+          email: string
+          full_name?: string | null
+          college?: string | null
+          department?: string | null
+          year?: string | null
+          hostel?: string | null
+          phone?: string | null
+          avatar_url?: string | null
+          verified_student?: boolean | null
+          rating?: number | null
+          reviews_count?: number | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          email?: string
+          full_name?: string | null
+          college?: string | null
+          department?: string | null
+          year?: string | null
+          hostel?: string | null
+          phone?: string | null
+          avatar_url?: string | null
+          verified_student?: boolean | null
+          rating?: number | null
+          reviews_count?: number | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       reservations: {
         Row: {
+          buyer_id: string | null
+          buyer_name: string | null
+          buyer_email: string | null
+          buyer_phone: string | null
           campus: string | null
           created_at: string | null
           id: string
@@ -200,6 +264,10 @@ export type Database = {
           total_amount: number
         }
         Insert: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          buyer_email?: string | null
+          buyer_phone?: string | null
           campus?: string | null
           created_at?: string | null
           id?: string
@@ -209,6 +277,10 @@ export type Database = {
           total_amount: number
         }
         Update: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          buyer_email?: string | null
+          buyer_phone?: string | null
           campus?: string | null
           created_at?: string | null
           id?: string
@@ -224,7 +296,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      register_student_account: {
+        Args: {
+          p_email: string
+          p_password: string
+          p_full_name: string
+          p_college: string
+          p_department?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { Package, ShieldCheck, Heart, MapPin, Mail, Sparkles, MessageSquare } from 'lucide-react';
 import { CATEGORIES } from '../data/mockProducts';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 export const Footer: React.FC = () => {
   return (
     <footer className="bg-slate-900 text-slate-300 pt-12 pb-24 md:pb-12 border-t border-slate-800">
@@ -118,7 +120,7 @@ export const Footer: React.FC = () => {
 
         {/* Bottom bar with clickable links */}
         <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
-          <p>© {new Date().getFullYear()} Campus Mart. Built with <Heart className="w-3 h-3 text-red-500 inline fill-red-500" /> for the student community.</p>
+          <p>© {CURRENT_YEAR} Campus Mart. Built with <Heart className="w-3 h-3 text-red-500 inline fill-red-500" /> for the student community.</p>
           <div className="flex flex-wrap items-center gap-6">
             <Link to="/terms" className="hover:text-emerald-400 transition-colors">
               Terms of Service

@@ -21,6 +21,9 @@ export interface ProductEnquiryPayload {
   productPrice?: number;
   sellerId?: string;
   sellerName?: string;
+  buyerId?: string;
+  buyerName?: string;
+  buyerEmail?: string;
   message: string;
   preferredMeetup?: string;
   shareContactConsent?: boolean;
@@ -38,13 +41,53 @@ export interface ReservationPayload {
   totalAmount: number;
   campus?: string;
   pickupSlot: string;
+  buyerId?: string;
+  buyerName?: string;
+  buyerEmail?: string;
+  buyerPhone?: string;
+}
+
+/**
+ * Upload product image to Supabase Storage bucket 'product-images'
+ */
+export async function uploadProductImage(file: File, userId?: string): Promise<string> {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+  if (!allowedTypes.includes(file.type)) {
+    throw new Error('Please upload a valid image file (JPG, PNG, or WEBP)');
+  }
+
+  // Max 8MB
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error('Image size must be less than 8MB');
+  }
+
+  const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const path = `${userId || 'public'}/${Date.now()}-${cleanFileName}`;
+
+  const { data, error } = await supabase.storage
+    .from('product-images')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    });
+
+  if (error) {
+    console.error('Error uploading image to Supabase Storage:', error);
+    throw new Error(`Upload failed: ${error.message}`);
+  }
+
+  const { data: publicUrlData } = supabase.storage
+    .from('product-images')
+    .getPublicUrl(data.path);
+
+  return publicUrlData.publicUrl;
 }
 
 /**
  * 1. Submit general contact & support inquiry
  */
 export async function submitContactInquiry(data: ContactInquiryPayload) {
-  const { data: record, error } = await supabase
+  const { error } = await supabase
     .from('contact_inquiries')
     .insert({
       name: data.name,
@@ -52,15 +95,13 @@ export async function submitContactInquiry(data: ContactInquiryPayload) {
       college: data.college || null,
       subject: data.subject,
       message: data.message,
-    })
-    .select()
-    .single();
+    });
 
   if (error) {
     console.error('Error submitting contact inquiry to Supabase:', error);
     throw error;
   }
-  return record;
+  return { success: true };
 }
 
 /**
@@ -75,6 +116,9 @@ export async function submitProductEnquiry(data: ProductEnquiryPayload) {
       product_price: data.productPrice ?? null,
       seller_id: data.sellerId || null,
       seller_name: data.sellerName || null,
+      buyer_id: data.buyerId || null,
+      buyer_name: data.buyerName || null,
+      buyer_email: data.buyerEmail || null,
       message: data.message,
       preferred_meetup: data.preferredMeetup || null,
       share_contact_consent: data.shareContactConsent ?? true,
@@ -142,6 +186,10 @@ export async function submitReservation(data: ReservationPayload) {
       total_amount: data.totalAmount,
       campus: data.campus || null,
       pickup_slot: data.pickupSlot,
+      buyer_id: data.buyerId || null,
+      buyer_name: data.buyerName || null,
+      buyer_email: data.buyerEmail || null,
+      buyer_phone: data.buyerPhone || null,
     })
     .select()
     .single();
@@ -239,4 +287,143 @@ export async function fetchProductsFromBackend(): Promise<Product[]> {
     console.warn('Could not fetch products from Supabase:', err);
     return [];
   }
+}
+
+/**
+ * 8. Fetch products belonging to a specific seller
+ */
+export async function fetchSellerProducts(sellerId: string): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching seller products:', error);
+    throw error;
+  }
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    description: row.description || '',
+    price: Number(row.price),
+    originalPrice: row.original_price ? Number(row.original_price) : undefined,
+    category: row.category,
+    condition: row.condition as any,
+    images: row.images || [],
+    campus: row.campus,
+    pickupLocation: row.pickup_location,
+    tags: row.tags || [],
+    createdAt: row.created_at ? row.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+    featured: row.featured ?? false,
+    isRecent: row.is_recent ?? false,
+    inStock: row.in_stock ?? true,
+    seller: {
+      id: row.seller_id || sellerId,
+      name: row.seller_name,
+      department: row.seller_department || '',
+      year: row.seller_year || '',
+      hostel: row.seller_hostel || '',
+      rating: row.seller_rating ? Number(row.seller_rating) : 5.0,
+      reviewsCount: row.seller_reviews_count || 1,
+      verifiedStudent: row.seller_verified ?? true,
+      avatarUrl: row.seller_avatar_url || '',
+      responseTime: row.seller_response_time || 'Under 30 mins',
+      campus: row.campus,
+    },
+  }));
+}
+
+/**
+ * 9. Update an existing product listing
+ */
+export async function updateProductListing(productId: string, updates: Partial<Product>) {
+  const updatePayload: any = {};
+  if (updates.title !== undefined) updatePayload.title = updates.title;
+  if (updates.description !== undefined) updatePayload.description = updates.description;
+  if (updates.price !== undefined) updatePayload.price = updates.price;
+  if (updates.originalPrice !== undefined) updatePayload.original_price = updates.originalPrice;
+  if (updates.category !== undefined) updatePayload.category = updates.category;
+  if (updates.condition !== undefined) updatePayload.condition = updates.condition;
+  if (updates.inStock !== undefined) updatePayload.in_stock = updates.inStock;
+  if (updates.pickupLocation !== undefined) updatePayload.pickup_location = updates.pickupLocation;
+  if (updates.images !== undefined) updatePayload.images = updates.images;
+
+  const { error } = await supabase
+    .from('products')
+    .update(updatePayload)
+    .eq('id', productId);
+
+  if (error) {
+    console.error('Error updating product listing:', error);
+    throw error;
+  }
+}
+
+/**
+ * 10. Delete a product listing
+ */
+export async function deleteProductListing(productId: string) {
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', productId);
+
+  if (error) {
+    console.error('Error deleting product listing:', error);
+    throw error;
+  }
+}
+
+/**
+ * 11. Fetch reservations for buyer
+ */
+export async function fetchUserReservations(buyerId: string) {
+  const { data, error } = await supabase
+    .from('reservations')
+    .select('*')
+    .eq('buyer_id', buyerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching user reservations:', error);
+    throw error;
+  }
+  return data || [];
+}
+
+/**
+ * 12. Fetch enquiries sent by buyer
+ */
+export async function fetchUserSentEnquiries(buyerId: string) {
+  const { data, error } = await supabase
+    .from('product_enquiries')
+    .select('*')
+    .eq('buyer_id', buyerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching sent enquiries:', error);
+    throw error;
+  }
+  return data || [];
+}
+
+/**
+ * 13. Fetch enquiries received by seller
+ */
+export async function fetchSellerReceivedEnquiries(sellerId: string) {
+  const { data, error } = await supabase
+    .from('product_enquiries')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching received enquiries:', error);
+    throw error;
+  }
+  return data || [];
 }

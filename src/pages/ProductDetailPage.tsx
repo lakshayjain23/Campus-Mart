@@ -16,7 +16,8 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
-import { getConditionBadge, ProductCard } from '../components/ProductCard';
+import { ProductCard } from '../components/ProductCard';
+import { getConditionBadge } from '../lib/utils';
 import { EnquiryModal } from '../components/EnquiryModal';
 
 export const ProductDetailPage: React.FC = () => {
