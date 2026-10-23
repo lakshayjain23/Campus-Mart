@@ -46,15 +46,17 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({ category }) => {
   return (
     <Link
       to={`/explore?category=${encodeURIComponent(category.name)}`}
-      className="group relative flex flex-col items-center p-2 sm:p-3.5 bg-white rounded-xl border border-slate-200 hover:border-emerald-600/40 hover:shadow-md transition-all duration-200 text-center"
+      className="group relative flex flex-col items-center justify-between p-2 sm:p-3.5 bg-white rounded-xl border border-slate-200 hover:border-emerald-600/40 hover:shadow-md transition-all duration-200 text-center h-full min-h-[110px] sm:min-h-[125px]"
     >
-      <div className="w-10 h-10 sm:w-13 sm:h-13 rounded-full bg-slate-50 group-hover:bg-emerald-50 border border-slate-100 group-hover:border-emerald-200 flex items-center justify-center mb-1.5 sm:mb-2 transition-colors duration-200 shrink-0">
+      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-50 group-hover:bg-emerald-50 border border-slate-100 group-hover:border-emerald-200 flex items-center justify-center mb-1.5 sm:mb-2 transition-colors duration-200 shrink-0">
         {iconMap[category.iconName] || <Compass className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-700" />}
       </div>
-      <h4 className="font-semibold text-slate-800 text-[11px] sm:text-xs md:text-sm group-hover:text-emerald-800 transition-colors line-clamp-2 leading-tight h-7 sm:h-9 flex items-center justify-center">
-        {category.name}
-      </h4>
-      <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1 font-medium">
+      <div className="flex-1 flex items-center justify-center w-full my-1 px-0.5">
+        <h4 className="font-semibold text-slate-800 text-[11px] sm:text-xs md:text-sm group-hover:text-emerald-800 transition-colors leading-tight sm:leading-snug text-center break-words hyphens-auto">
+          {category.name}
+        </h4>
+      </div>
+      <p className="text-[10px] sm:text-xs text-slate-500 mt-auto font-medium shrink-0">
         {actualListingCount} {actualListingCount === 1 ? 'item' : 'items'}
       </p>
     </Link>

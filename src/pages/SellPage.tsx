@@ -13,13 +13,32 @@ import {
   Database,
   Loader2,
   Lock,
+  Clock,
+  BookOpen,
+  Home,
+  Compass,
+  Laptop,
+  AlertTriangle,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { useAuth } from '../context/AuthContext';
 import { uploadProductImage } from '../lib/supabase';
+import { validateListingContent, validateImageFile } from '../lib/guardrails';
 import type { Condition, Product } from '../types/product';
 import { CATEGORIES } from '../data/mockProducts';
 import { ProductCard } from '../components/ProductCard';
+
+function get21DayExpiryIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 21);
+  return d.toISOString();
+}
+
+function get21DayExpiryFormatted(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 21);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 export const SellPage: React.FC = () => {
   const { addProduct, campuses, addCampus, selectedCampus } = useMarketplace();
@@ -32,12 +51,33 @@ export const SellPage: React.FC = () => {
 
   // Form Fields
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Books & Study Materials');
+  const [category, setCategory] = useState('Course Textbooks');
   const [condition, setCondition] = useState<Condition>('like_new');
   const [price, setPrice] = useState<number | ''>('');
   const [originalPrice, setOriginalPrice] = useState<number | ''>('');
   const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
+
+  // Structured Category Specific Fields
+  // 1. Textbooks
+  const [courseCode, setCourseCode] = useState('');
+  const [semester, setSemester] = useState('1st Semester');
+  const [bookAuthor, setBookAuthor] = useState('');
+  const [bookEdition, setBookEdition] = useState('');
+
+  // 2. Dorm & Room Essentials
+  const [dormItemType, setDormItemType] = useState('Electric Kettle');
+  const [dormDimensions, setDormDimensions] = useState('');
+
+  // 3. Campus Mobility
+  const [mobilityType, setMobilityType] = useState('Bicycle (Geared)');
+  const [gearCount, setGearCount] = useState('21-Speed');
+  const [hasLock, setHasLock] = useState(true);
+
+  // 4. Electronics & Accessories
+  const [electronicsBrand, setElectronicsBrand] = useState('');
+  const [electronicsModel, setElectronicsModel] = useState('');
+  const [compatibility, setCompatibility] = useState('');
 
   // Image Upload state (From Device + URL option)
   const [imageUrl, setImageUrl] = useState<string>('');
@@ -73,15 +113,11 @@ export const SellPage: React.FC = () => {
   // Error validation
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Device File Upload Handler
+  // Device File Upload Handler with Guardrail validation
   const processFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrors((prev) => ({ ...prev, image: 'Please select a valid image file (PNG, JPG, WEBP).' }));
-      return;
-    }
-
-    if (file.size > 8 * 1024 * 1024) {
-      setErrors((prev) => ({ ...prev, image: 'Image size should be under 8MB.' }));
+    const fileCheck = validateImageFile(file);
+    if (!fileCheck.isValid) {
+      setErrors((prev) => ({ ...prev, image: fileCheck.reason || 'Invalid image file.' }));
       return;
     }
 
@@ -144,17 +180,52 @@ export const SellPage: React.FC = () => {
 
   const validateStep1 = () => {
     const errs: Record<string, string> = {};
-    if (!title.trim()) errs.title = 'Please enter a product title.';
-    else if (title.trim().length < 5) errs.title = 'Title must be at least 5 characters.';
+    if (!title.trim()) {
+      errs.title = 'Please enter a product title.';
+    } else if (title.trim().length < 5) {
+      errs.title = 'Title must be at least 5 characters.';
+    } else if (title.trim().length > 120) {
+      errs.title = 'Title cannot exceed 120 characters.';
+    }
+
+    // Safety text guardrail
+    const guardCheck = validateListingContent(title, description);
+    if (!guardCheck.isValid) {
+      errs.title = guardCheck.reason || 'Item violates campus safety policy.';
+    }
+
+    // Category-specific validations
+    if (category === 'Course Textbooks' || category === 'Books & Study Materials') {
+      if (!courseCode.trim()) {
+        errs.courseCode = 'Course Code is required for textbooks (e.g. CS201, COL106).';
+      }
+      if (!semester.trim()) {
+        errs.semester = 'Semester is required for textbooks.';
+      }
+    }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   const validateStep2 = () => {
     const errs: Record<string, string> = {};
-    if (!price || Number(price) <= 0) errs.price = 'Please enter a valid price in INR.';
-    if (!description.trim()) errs.description = 'Please provide a brief description.';
-    else if (description.trim().length < 20) errs.description = 'Description should be at least 20 characters.';
+    if (price === '' || Number(price) < 0) {
+      errs.price = 'Please enter a valid non-negative price (₹0 or greater).';
+    }
+    if (!description.trim()) {
+      errs.description = 'Please provide a product description.';
+    } else if (description.trim().length < 20) {
+      errs.description = 'Description should be at least 20 characters.';
+    } else if (description.trim().length > 2000) {
+      errs.description = 'Description cannot exceed 2000 characters.';
+    }
+
+    const guardCheck = validateListingContent(title, description);
+    if (!guardCheck.isValid) {
+      errs.description = guardCheck.reason || 'Description violates prohibited items policy.';
+    }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -201,17 +272,68 @@ export const SellPage: React.FC = () => {
         .map((t) => t.trim())
         .filter(Boolean);
 
+      // Package structured category fields
+      let categoryFields: Record<string, any> = {};
+      const specifications: Record<string, string> = {};
+
+      if (category === 'Course Textbooks' || category === 'Books & Study Materials') {
+        categoryFields = {
+          courseCode: courseCode.trim().toUpperCase(),
+          semester,
+          author: bookAuthor.trim() || undefined,
+          edition: bookEdition.trim() || undefined,
+        };
+        specifications['Course Code'] = courseCode.trim().toUpperCase();
+        specifications['Semester'] = semester;
+        if (bookAuthor) specifications['Author'] = bookAuthor.trim();
+        if (bookEdition) specifications['Edition'] = bookEdition.trim();
+      } else if (category === 'Dorm & Room Essentials' || category === 'Hostel Essentials') {
+        categoryFields = {
+          itemType: dormItemType,
+          dimensions: dormDimensions.trim() || undefined,
+        };
+        specifications['Item Type'] = dormItemType;
+        if (dormDimensions) specifications['Dimensions / Specs'] = dormDimensions.trim();
+      } else if (category === 'Campus Mobility') {
+        categoryFields = {
+          mobilityType,
+          gearCount,
+          hasLock,
+        };
+        specifications['Vehicle Type'] = mobilityType;
+        specifications['Gears'] = gearCount;
+        specifications['Includes Lock'] = hasLock ? 'Yes' : 'No';
+      } else if (category === 'Electronics & Accessories' || category === 'Electronics') {
+        categoryFields = {
+          brand: electronicsBrand.trim() || undefined,
+          model: electronicsModel.trim() || undefined,
+          compatibility: compatibility.trim() || undefined,
+        };
+        if (electronicsBrand) specifications['Brand'] = electronicsBrand.trim();
+        if (electronicsModel) specifications['Model'] = electronicsModel.trim();
+        if (compatibility) specifications['Compatibility'] = compatibility.trim();
+      }
+
+      // 21-day expiry
+      const expiresAt = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString();
+
       const newProd = addProduct({
-        title,
-        description,
+        title: title.trim(),
+        description: description.trim(),
         price: Number(price),
         originalPrice: originalPrice ? Number(originalPrice) : undefined,
         category,
         condition,
         images: [finalImageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
         campus,
-        pickupLocation,
+        pickupLocation: pickupLocation.trim(),
         tags: tags.length ? tags : ['CampusDeal', 'StudentVerified'],
+        status: 'available',
+        expiresAt: expiresAt,
+        courseCode: courseCode ? courseCode.trim().toUpperCase() : undefined,
+        semester: semester || undefined,
+        categoryFields,
+        specifications,
         seller: {
           id: user.id,
           name: profile?.full_name || sellerName || user.email?.split('@')[0] || 'Campus Student',
@@ -236,7 +358,7 @@ export const SellPage: React.FC = () => {
     }
   };
 
-  // Preview dummy object memoized to avoid impure render date execution
+  // Preview dummy object memoized
   const previewProduct: Product = useMemo(() => ({
     id: 'preview-temp',
     title: title || 'Untitled Product',
@@ -245,6 +367,10 @@ export const SellPage: React.FC = () => {
     originalPrice: originalPrice ? Number(originalPrice) : undefined,
     category,
     condition,
+    status: 'available',
+    expiresAt: get21DayExpiryIso(),
+    courseCode: courseCode ? courseCode.toUpperCase() : undefined,
+    semester: semester || undefined,
     images: [imageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
     campus,
     pickupLocation: pickupLocation || 'Campus Hub',
@@ -280,13 +406,15 @@ export const SellPage: React.FC = () => {
     hostel,
     user,
     profile,
+    courseCode,
+    semester,
   ]);
 
   // SUCCESS STATE
   if (createdProduct) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] py-12 px-4 flex items-center justify-center">
-        <div className="bg-white max-w-lg w-full p-8 rounded-2xl border border-slate-200 text-center shadow-lg space-y-6 animate-in fade-in zoom-in-95">
+        <div className="bg-white max-w-lg w-full p-8 rounded-3xl border border-slate-200 text-center shadow-lg space-y-6 animate-in fade-in zoom-in-95">
           <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
             <CheckCircle2 className="w-10 h-10 text-emerald-700" />
           </div>
@@ -298,12 +426,18 @@ export const SellPage: React.FC = () => {
             <h2 className="text-2xl font-black text-slate-900 mt-1">
               Your Product is Live on Campus Mart!
             </h2>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 mt-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[11px] font-semibold">
-              <Database className="w-3.5 h-3.5" />
-              <span>Saved to Supabase Backend</span>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[11px] font-semibold">
+                <Database className="w-3.5 h-3.5" />
+                <span>Saved to Supabase Backend</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-full text-[11px] font-semibold">
+                <Clock className="w-3.5 h-3.5 text-amber-700" />
+                <span>Active for 21 Days (Renewable)</span>
+              </span>
             </div>
-            <p className="text-xs text-slate-500 mt-2 max-w-sm mx-auto">
-              Students at <strong className="text-slate-800">{campus}</strong> can now discover your listing and make safe hand-off enquiries.
+            <p className="text-xs text-slate-500 mt-3 max-w-sm mx-auto">
+              Students at <strong className="text-slate-800">{campus}</strong> can now discover your listing and initiate safe on-campus handovers.
             </p>
           </div>
 
@@ -319,19 +453,12 @@ export const SellPage: React.FC = () => {
             >
               View Live Listing
             </Link>
-            <button
-              onClick={() => {
-                setCreatedProduct(null);
-                setCurrentStep(1);
-                setTitle('');
-                setPrice('');
-                setDescription('');
-                handleRemoveImage();
-              }}
-              className="w-full sm:w-auto px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-full transition-colors cursor-pointer"
+            <Link
+              to="/dashboard"
+              className="w-full sm:w-auto px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-full transition-colors"
             >
-              List Another Item
-            </button>
+              Go to Seller Dashboard
+            </Link>
           </div>
         </div>
       </div>
@@ -350,22 +477,22 @@ export const SellPage: React.FC = () => {
             List an Item on Campus Mart
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Fast, zero platform fees, and direct handovers within your college campus
+            Fast, zero platform fees, 21-day auto-expiry, and verified student handovers
           </p>
         </div>
 
         {/* Wizard Step Indicator */}
-        <div className="bg-white p-2.5 sm:p-4 rounded-xl border border-slate-200 shadow-2xs mb-6 sm:mb-8">
+        <div className="bg-white p-2.5 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs mb-6 sm:mb-8">
           <div className="grid grid-cols-4 gap-1 sm:gap-2 text-center text-[10px] sm:text-xs font-semibold">
             {[
-              { step: 1, label: '1. Info', fullLabel: '1. Product Info' },
-              { step: 2, label: '2. Price', fullLabel: '2. Pricing & Details' },
+              { step: 1, label: '1. Category', fullLabel: '1. Category & Details' },
+              { step: 2, label: '2. Price', fullLabel: '2. Pricing & Description' },
               { step: 3, label: '3. Photo', fullLabel: '3. Photo & Location' },
               { step: 4, label: '4. Post', fullLabel: '4. Preview & Post' },
             ].map((s) => (
               <div
                 key={s.step}
-                className={`py-1.5 sm:py-2 px-1 rounded-lg transition-colors truncate ${
+                className={`py-1.5 sm:py-2 px-1 rounded-xl transition-colors truncate ${
                   currentStep === s.step
                     ? 'bg-[#064E3B] text-white font-bold shadow-2xs'
                     : currentStep > s.step
@@ -381,13 +508,13 @@ export const SellPage: React.FC = () => {
         </div>
 
         {/* Form Container */}
-        <div className="bg-white p-4 sm:p-8 md:p-10 rounded-2xl border border-slate-200 shadow-xs">
-          {/* STEP 1: Basic Info */}
+        <div className="bg-white p-4 sm:p-8 md:p-10 rounded-3xl border border-slate-200 shadow-xs">
+          {/* STEP 1: Basic Info & Structured Category Fields */}
           {currentStep === 1 && (
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">What are you listing?</h2>
-                <p className="text-xs text-slate-500">Provide a clear, specific title and choose the category.</p>
+                <p className="text-xs text-slate-500">Provide a specific title and select the campus-specific category.</p>
               </div>
 
               {/* Title */}
@@ -398,20 +525,27 @@ export const SellPage: React.FC = () => {
                 <input
                   type="text"
                   value={title}
+                  maxLength={120}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Casio fx-991CW Scientific Calculator with Slide Case"
+                  placeholder="e.g. Casio fx-991CW Scientific Calculator or CLRS 3rd Edition"
                   className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-[#15803D]"
                 />
-                {errors.title && <p className="text-xs text-red-600 mt-1">{errors.title}</p>}
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Include brand, model, edition, or size to help other students find it.
-                </p>
+                {errors.title && (
+                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{errors.title}</span>
+                  </p>
+                )}
+                <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
+                  <span>Include brand, model, or edition to help other students find it.</span>
+                  <span>{title.length}/120</span>
+                </div>
               </div>
 
               {/* Category */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Category <span className="text-red-500">*</span>
+                  Campus Marketplace Category <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={category}
@@ -423,6 +557,217 @@ export const SellPage: React.FC = () => {
                   ))}
                 </select>
               </div>
+
+              {/* DYNAMIC CATEGORY-SPECIFIC STRUCTURED FIELDS */}
+              {/* Category A: Course Textbooks */}
+              {(category === 'Course Textbooks' || category === 'Books & Study Materials') && (
+                <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-4 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 border-b border-emerald-200/60 pb-2">
+                    <BookOpen className="w-4 h-4 text-emerald-700" />
+                    <span>Course Textbook Details (Required for academic search)</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Course Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={courseCode}
+                        onChange={(e) => setCourseCode(e.target.value)}
+                        placeholder="e.g. CS201, COL106, ELL100, MA110"
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl uppercase focus:outline-none focus:border-[#15803D]"
+                      />
+                      {errors.courseCode && <p className="text-xs text-red-600 mt-1">{errors.courseCode}</p>}
+                      <p className="text-[11px] text-slate-400 mt-1">Students search textbooks by course code.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Semester <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={semester}
+                        onChange={(e) => setSemester(e.target.value)}
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      >
+                        <option value="1st Semester">1st Semester (Freshman)</option>
+                        <option value="2nd Semester">2nd Semester</option>
+                        <option value="3rd Semester">3rd Semester (Sophomore)</option>
+                        <option value="4th Semester">4th Semester</option>
+                        <option value="5th Semester">5th Semester (Junior)</option>
+                        <option value="6th Semester">6th Semester</option>
+                        <option value="7th Semester">7th Semester (Senior)</option>
+                        <option value="8th Semester">8th Semester</option>
+                        <option value="Postgraduate / PhD">Postgraduate / Masters / PhD</option>
+                      </select>
+                      {errors.semester && <p className="text-xs text-red-600 mt-1">{errors.semester}</p>}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Book Author <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={bookAuthor}
+                        onChange={(e) => setBookAuthor(e.target.value)}
+                        placeholder="e.g. Cormen, Tanenbaum, Halliday & Resnick"
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Edition <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={bookEdition}
+                        onChange={(e) => setBookEdition(e.target.value)}
+                        placeholder="e.g. 3rd Edition (2022 Reprint)"
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Category B: Dorm & Room Essentials */}
+              {(category === 'Dorm & Room Essentials' || category === 'Hostel Essentials') && (
+                <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-2xl space-y-4 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-900 border-b border-amber-200/60 pb-2">
+                    <Home className="w-4 h-4 text-amber-700" />
+                    <span>Dorm & Room Item Specifications</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Item Type</label>
+                      <select
+                        value={dormItemType}
+                        onChange={(e) => setDormItemType(e.target.value)}
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      >
+                        <option value="Electric Kettle">Electric Kettle</option>
+                        <option value="Mattress / Bedding">Mattress / Bedding</option>
+                        <option value="Study Lamp">Study Lamp</option>
+                        <option value="Mini Fridge / Cooler">Mini Fridge / Cooler</option>
+                        <option value="Storage Box / Wardrobe Organizer">Storage Box / Organizer</option>
+                        <option value="Chair / Bed Desk">Chair / Bed Desk</option>
+                        <option value="Drying Rack">Drying Rack</option>
+                        <option value="Room Heater">Room Heater</option>
+                        <option value="Other Room Essential">Other Room Essential</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Dimensions / Capacity <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={dormDimensions}
+                        onChange={(e) => setDormDimensions(e.target.value)}
+                        placeholder="e.g. 1.5 Litres, 6x3 ft mattress, 50L box"
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Category C: Campus Mobility */}
+              {category === 'Campus Mobility' && (
+                <div className="p-4 bg-blue-50/50 border border-blue-200 rounded-2xl space-y-4 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-bold text-blue-900 border-b border-blue-200/60 pb-2">
+                    <Compass className="w-4 h-4 text-blue-700" />
+                    <span>Campus Mobility & Vehicle Specs</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Vehicle Type</label>
+                      <select
+                        value={mobilityType}
+                        onChange={(e) => setMobilityType(e.target.value)}
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      >
+                        <option value="Bicycle (Geared)">Bicycle (Geared)</option>
+                        <option value="Bicycle (Single Speed)">Bicycle (Single Speed)</option>
+                        <option value="Skateboard / Longboard">Skateboard / Longboard</option>
+                        <option value="Electric Scooter">Electric Scooter</option>
+                        <option value="Roller Skates">Roller Skates</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Gears / Configuration</label>
+                      <input
+                        type="text"
+                        value={gearCount}
+                        onChange={(e) => setGearCount(e.target.value)}
+                        placeholder="e.g. 21-Speed Shimano, 7-Speed, Single Speed"
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1 text-xs font-semibold text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={hasLock}
+                      onChange={(e) => setHasLock(e.target.checked)}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300"
+                    />
+                    <span>Includes bicycle / vehicle security lock</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Category D: Electronics & Accessories */}
+              {(category === 'Electronics & Accessories' || category === 'Electronics') && (
+                <div className="p-4 bg-purple-50/50 border border-purple-200 rounded-2xl space-y-4 animate-in fade-in">
+                  <div className="flex items-center gap-2 text-xs font-bold text-purple-900 border-b border-purple-200/60 pb-2">
+                    <Laptop className="w-4 h-4 text-purple-700" />
+                    <span>Electronics Brand & Compatibility</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Brand</label>
+                      <input
+                        type="text"
+                        value={electronicsBrand}
+                        onChange={(e) => setElectronicsBrand(e.target.value)}
+                        placeholder="e.g. Casio, Apple, Dell, Logitech"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Model</label>
+                      <input
+                        type="text"
+                        value={electronicsModel}
+                        onChange={(e) => setElectronicsModel(e.target.value)}
+                        placeholder="e.g. fx-991CW, MX Master 3"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">Compatibility</label>
+                      <input
+                        type="text"
+                        value={compatibility}
+                        onChange={(e) => setCompatibility(e.target.value)}
+                        placeholder="e.g. Type-C, Engineering Approved"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Condition Cards */}
               <div>
@@ -440,7 +785,7 @@ export const SellPage: React.FC = () => {
                       key={cond.val}
                       type="button"
                       onClick={() => setCondition(cond.val as Condition)}
-                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
                         condition === cond.val
                           ? 'border-[#064E3B] bg-emerald-50/60 ring-2 ring-emerald-600/20'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -476,9 +821,10 @@ export const SellPage: React.FC = () => {
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                     <input
                       type="number"
+                      min={0}
                       value={price}
                       onChange={(e) => setPrice(e.target.value ? Number(e.target.value) : '')}
-                      placeholder="e.g. 750"
+                      placeholder="e.g. 750 (Enter 0 for Free Giveaway)"
                       className="w-full pl-8 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-[#15803D]"
                     />
                   </div>
@@ -493,13 +839,14 @@ export const SellPage: React.FC = () => {
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                     <input
                       type="number"
+                      min={0}
                       value={originalPrice}
                       onChange={(e) => setOriginalPrice(e.target.value ? Number(e.target.value) : '')}
                       placeholder="e.g. 1499"
                       className="w-full pl-8 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-[#15803D]"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Helps show savings to peer buyers</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Shows peer buyers how much they save</p>
                 </div>
               </div>
 
@@ -510,12 +857,22 @@ export const SellPage: React.FC = () => {
                 </label>
                 <textarea
                   rows={4}
+                  maxLength={2000}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Describe condition, battery health, edition, why you are selling, or what accessories are included..."
                   className="w-full p-4 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-[#15803D]"
                 />
-                {errors.description && <p className="text-xs text-red-600 mt-1">{errors.description}</p>}
+                {errors.description && (
+                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{errors.description}</span>
+                  </p>
+                )}
+                <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                  <span>Minimum 20 characters required.</span>
+                  <span>{description.length}/2000</span>
+                </div>
               </div>
 
               {/* Tags */}
@@ -539,7 +896,7 @@ export const SellPage: React.FC = () => {
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Photo & Campus Handover</h2>
-                <p className="text-xs text-slate-500">Upload a product photo from your device and specify your college meetup spot.</p>
+                <p className="text-xs text-slate-500">Upload a real product photo from your device and designate your college handover point.</p>
               </div>
 
               {/* Device Photo Upload Section */}
@@ -557,11 +914,10 @@ export const SellPage: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Hidden File Input */}
                 <input
                   type="file"
                   ref={fileInputRef}
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp,image/jpg"
                   onChange={handleFileInputChange}
                   className="hidden"
                 />
@@ -569,26 +925,25 @@ export const SellPage: React.FC = () => {
                 {!useUrlMode ? (
                   <div>
                     {!imageUrl ? (
-                      /* Drag and Drop / Device Browse Box */
                       <div
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
                         onClick={() => fileInputRef.current?.click()}
-                        className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                        className={`border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all ${
                           isDragging
                             ? 'border-emerald-600 bg-emerald-50/80 scale-[1.01]'
                             : 'border-slate-300 hover:border-emerald-500 hover:bg-slate-50/80 bg-white'
                         }`}
                       >
-                        <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                        <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto mb-3 shadow-xs">
                           <Upload className="w-6 h-6 text-emerald-700" />
                         </div>
                         <h4 className="text-sm font-bold text-slate-900 mb-1">
                           Click to Add Photo from Device
                         </h4>
                         <p className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                          Choose from your computer files, mobile gallery, or take a picture with your camera (PNG, JPG, WEBP).
+                          Max 8MB. Accepted formats: JPG, PNG, WEBP.
                         </p>
                         <button
                           type="button"
@@ -603,7 +958,6 @@ export const SellPage: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      /* Loaded Image Preview Box */
                       <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col sm:flex-row items-center gap-5">
                         <div className="relative w-36 h-36 rounded-xl overflow-hidden bg-white border border-slate-200 shrink-0 shadow-xs">
                           <img
@@ -615,17 +969,13 @@ export const SellPage: React.FC = () => {
                         <div className="flex-1 text-center sm:text-left space-y-2">
                           <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs font-bold text-emerald-800">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>Photo successfully uploaded from device</span>
+                            <span>Photo successfully selected from device</span>
                           </div>
                           {imageFileName && (
                             <p className="text-xs text-slate-600 font-medium truncate max-w-sm">
                               {imageFileName} {imageFileSize && `(${imageFileSize})`}
                             </p>
                           )}
-                          <p className="text-[11px] text-slate-400">
-                            This photo will appear in the marketplace search and listing page.
-                          </p>
-
                           <div className="flex items-center justify-center sm:justify-start gap-3 pt-2">
                             <button
                               type="button"
@@ -648,17 +998,14 @@ export const SellPage: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  /* Alternate URL Mode */
                   <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="url"
-                        value={imageUrl}
-                        onChange={(e) => setImageUrl(e.target.value)}
-                        placeholder="https://images.unsplash.com/photo-..."
-                        className="flex-1 px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
-                      />
-                    </div>
+                    <input
+                      type="url"
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      placeholder="https://images.unsplash.com/photo-..."
+                      className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
+                    />
                     {imageUrl && (
                       <div className="w-24 h-24 rounded-lg overflow-hidden border border-slate-200">
                         <img src={imageUrl} alt="preview" className="w-full h-full object-cover" />
@@ -673,7 +1020,6 @@ export const SellPage: React.FC = () => {
               {/* Campus & Hostel Information */}
               <div className="pt-6 border-t border-slate-100 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Campus Select + Add College Button */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs font-bold text-slate-800">
@@ -699,9 +1045,8 @@ export const SellPage: React.FC = () => {
                       ))}
                     </select>
 
-                    {/* Inline Add College input if clicked */}
                     {showAddCampusInline && (
-                      <div className="mt-2 p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2 animate-in fade-in duration-150">
+                      <div className="mt-2 p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
                         <span className="text-[11px] font-bold text-emerald-900 block">
                           Enter College / University Name:
                         </span>
@@ -710,9 +1055,8 @@ export const SellPage: React.FC = () => {
                             type="text"
                             value={newCampusInput}
                             onChange={(e) => setNewCampusInput(e.target.value)}
-                            placeholder="e.g. SRM Institute, VIT Vellore, MIT..."
+                            placeholder="e.g. SRM Institute, VIT Vellore..."
                             className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#15803D]"
-                            autoFocus
                           />
                           <button
                             type="button"
@@ -728,13 +1072,13 @@ export const SellPage: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-bold text-slate-800 mb-1">
-                      Hostel / Hall of Residence <span className="text-red-500">*</span>
+                      Hostel / Residential Block <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
                       value={hostel}
                       onChange={(e) => setHostel(e.target.value)}
-                      placeholder="e.g. Karakoram Hostel, Wing B"
+                      placeholder="e.g. Karakoram Hostel, Room 304"
                       className="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
                     />
                     {errors.hostel && <p className="text-xs text-red-600 mt-1">{errors.hostel}</p>}
@@ -743,13 +1087,13 @@ export const SellPage: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-800 mb-1">
-                    Preferred Handover Spot <span className="text-red-500">*</span>
+                    Designated Public Handover Spot <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={pickupLocation}
                     onChange={(e) => setPickupLocation(e.target.value)}
-                    placeholder="e.g. Near Student Activity Center (SAC) / Nescafe Lawn"
+                    placeholder="e.g. Near Student Activity Center (SAC) / Central Library Lawn"
                     className="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
                   />
                   {errors.pickup && <p className="text-xs text-red-600 mt-1">{errors.pickup}</p>}
@@ -808,8 +1152,19 @@ export const SellPage: React.FC = () => {
                 <p className="text-xs text-slate-500">Review how your listing appears to fellow students before publishing.</p>
               </div>
 
+              {/* 21-Day Expiry Notice */}
+              <div className="p-4 bg-amber-50/80 rounded-2xl border border-amber-200 flex items-start gap-3">
+                <Clock className="w-5 h-5 text-amber-800 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-950">
+                  <h4 className="font-bold">21-Day Automatic Campus Marketplace Expiry</h4>
+                  <p className="mt-0.5 text-amber-900/90 leading-relaxed">
+                    To keep listings fresh and prevent ghost items on campus, your listing will remain active for 21 days until <strong>{get21DayExpiryFormatted()}</strong>. You can renew it at any time with one click from your Seller Dashboard.
+                  </p>
+                </div>
+              </div>
+
               {/* Card Preview */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-slate-50 rounded-2xl border border-slate-200">
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
                     Marketplace Card View:
@@ -819,12 +1174,14 @@ export const SellPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="text-xs text-slate-700 space-y-3">
+                <div className="text-xs text-slate-700 space-y-2.5">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                     Listing Summary:
                   </span>
+                  <p><strong className="text-slate-900">Category:</strong> {category}</p>
+                  {courseCode && <p><strong className="text-slate-900">Course Code:</strong> {courseCode.toUpperCase()} ({semester})</p>}
                   <p><strong className="text-slate-900">Campus:</strong> {campus}</p>
-                  <p><strong className="text-slate-900">Pickup:</strong> {pickupLocation}</p>
+                  <p><strong className="text-slate-900">Handover Spot:</strong> {pickupLocation}</p>
                   <p><strong className="text-slate-900">Hostel:</strong> {hostel}</p>
                   <p><strong className="text-slate-900">Seller:</strong> {sellerName} ({department}, {year})</p>
                   <p className="text-slate-500 italic border-l-2 border-emerald-600 pl-2">
@@ -833,8 +1190,8 @@ export const SellPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Safety commitment checkbox */}
-              <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5">
+              {/* Safety commitment */}
+              <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <span>
                   I confirm this item is in my possession on campus, matches the provided photos, and that I will meet buyers only in designated public campus areas.
@@ -898,3 +1255,5 @@ export const SellPage: React.FC = () => {
     </div>
   );
 };
+
+export default SellPage;

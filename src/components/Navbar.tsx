@@ -15,6 +15,8 @@ import {
   Plus,
   Check,
   LogOut,
+  MessageSquare,
+  ShieldAlert,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { useAuth } from '../context/AuthContext';
@@ -290,11 +292,20 @@ export const Navbar: React.FC = () => {
               className="hidden md:inline-flex relative p-2 rounded-lg text-slate-700 hover:text-[#064E3B] hover:bg-slate-50 transition-colors"
             >
               <Heart className="w-4 h-4 lg:w-5 lg:h-5" />
-              {wishlistCount > 0 && (
+              {user && wishlistCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {wishlistCount}
                 </span>
               )}
+            </Link>
+
+            {/* Messages Link (Tablet & Desktop: md+) */}
+            <Link
+              to="/messages"
+              aria-label="Campus Messages"
+              className="hidden md:inline-flex relative p-2 rounded-lg text-slate-700 hover:text-[#064E3B] hover:bg-slate-50 transition-colors"
+            >
+              <MessageSquare className="w-4 h-4 lg:w-5 lg:h-5" />
             </Link>
 
             {/* Cart Link (Tablet & Desktop: md+) */}
@@ -348,6 +359,13 @@ export const Navbar: React.FC = () => {
                       Seller Dashboard
                     </Link>
                     <Link
+                      to="/messages"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="block px-4 py-2 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 font-semibold"
+                    >
+                      Campus Chats & Meetups
+                    </Link>
+                    <Link
                       to="/orders"
                       onClick={() => setProfileDropdownOpen(false)}
                       className="block px-4 py-2 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 font-semibold"
@@ -361,6 +379,17 @@ export const Navbar: React.FC = () => {
                     >
                       Saved Items ({wishlistCount})
                     </Link>
+
+                    {(profile?.role === 'moderator' || profile?.role === 'admin') && (
+                      <Link
+                        to="/moderation"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-1.5 px-4 py-2 text-xs text-rose-700 hover:bg-rose-50 font-bold border-t border-slate-100"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span>Moderation Queue</span>
+                      </Link>
+                    )}
 
                     <div className="border-t border-slate-100 mt-1 pt-1">
                       <button
@@ -541,7 +570,7 @@ export const Navbar: React.FC = () => {
               className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg flex items-center justify-between"
             >
               <span>Wishlist</span>
-              {wishlistCount > 0 && (
+              {user && wishlistCount > 0 && (
                 <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
                   {wishlistCount}
                 </span>
@@ -559,6 +588,24 @@ export const Navbar: React.FC = () => {
                 </span>
               )}
             </Link>
+            <Link
+              to="/messages"
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 rounded-lg flex items-center justify-between"
+            >
+              <span>Campus Chats</span>
+              <MessageSquare className="w-4 h-4 text-emerald-700" />
+            </Link>
+            {(profile?.role === 'moderator' || profile?.role === 'admin') && (
+              <Link
+                to="/moderation"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 rounded-lg flex items-center justify-between"
+              >
+                <span>Moderation Queue</span>
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+              </Link>
+            )}
           </div>
 
           {/* Categories Quick List */}

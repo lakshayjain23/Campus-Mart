@@ -11,12 +11,13 @@ interface AuthContextType {
   session: Session | null;
   isLoading: boolean;
   isAuthModalOpen: boolean;
-  authMode: 'signin' | 'signup';
+  authMode: 'signin' | 'signup' | 'reset';
   setIsAuthModalOpen: (open: boolean) => void;
-  setAuthMode: (mode: 'signin' | 'signup') => void;
-  openAuthModal: (mode?: 'signin' | 'signup') => void;
+  setAuthMode: (mode: 'signin' | 'signup' | 'reset') => void;
+  openAuthModal: (mode?: 'signin' | 'signup' | 'reset') => void;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, metadata: { fullName: string; college: string; department?: string }) => Promise<{ error: Error | null }>;
+  resetPassword: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
@@ -30,7 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'reset'>('signin');
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -86,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const openAuthModal = (mode: 'signin' | 'signup' = 'signin') => {
+  const openAuthModal = (mode: 'signin' | 'signup' | 'reset' = 'signin') => {
     setAuthMode(mode);
     setIsAuthModalOpen(true);
   };
@@ -266,6 +267,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const resetPassword = async (email: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) return { error: error as Error };
+      return { error: null };
+    } catch (err: any) {
+      return { error: err as Error };
+    }
+  };
+
   const refreshProfile = async () => {
     if (user) {
       await fetchProfile(user.id);
@@ -286,6 +300,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openAuthModal,
         signIn,
         signUp,
+        resetPassword,
         signOut,
         updateProfile,
         refreshProfile,

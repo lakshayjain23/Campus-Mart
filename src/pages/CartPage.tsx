@@ -21,7 +21,7 @@ import { submitReservation } from '../lib/supabase';
 
 export const CartPage: React.FC = () => {
   const { cart, removeFromCart, updateCartQuantity, clearCart, cartTotal, selectedCampus } = useMarketplace();
-  const { user, profile } = useAuth();
+  const { user, profile, openAuthModal } = useAuth();
 
   const [pickupSlot, setPickupSlot] = useState('Today 5:00 PM - SAC / Central Canteen');
   const [confirmedModalOpen, setConfirmedModalOpen] = useState(false);
@@ -32,6 +32,22 @@ export const CartPage: React.FC = () => {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (!user) {
+      openAuthModal('signin');
+      return;
+    }
+
+    // Verify all cart items are currently available before reserving
+    const unavailableItem = cart.find(
+      (item) => item.product.status === 'sold' || item.product.status === 'reserved' || item.product.status === 'archived' || item.product.inStock === false
+    );
+    if (unavailableItem) {
+      setCheckoutError(
+        `Item "${unavailableItem.product.title}" is ${unavailableItem.product.status || 'unavailable'}. Please remove it from your cart before proceeding.`
+      );
+      return;
+    }
 
     setIsSubmitting(true);
     setCheckoutError(null);
@@ -49,9 +65,9 @@ export const CartPage: React.FC = () => {
         totalAmount: cartTotal,
         campus: selectedCampus,
         pickupSlot,
-        buyerId: user?.id,
-        buyerName: profile?.full_name || user?.email?.split('@')[0],
-        buyerEmail: user?.email,
+        buyerId: user.id,
+        buyerName: profile?.full_name || user.email?.split('@')[0],
+        buyerEmail: user.email,
       });
 
       if (saved && saved.id) {

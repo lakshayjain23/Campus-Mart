@@ -2,16 +2,18 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Compass, PlusCircle, Heart, ShoppingBag } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { useAuth } from '../context/AuthContext';
 
 export const MobileBottomNav: React.FC = () => {
   const location = useLocation();
+  const { user } = useAuth();
   const { wishlistCount, cartCount } = useMarketplace();
 
   const navItems = [
     { label: 'Home', path: '/', icon: Home },
     { label: 'Explore', path: '/explore', icon: Compass },
     { label: 'Sell', path: '/sell', icon: PlusCircle, isHighlight: true },
-    { label: 'Saved', path: '/wishlist', icon: Heart, badge: wishlistCount },
+    { label: 'Saved', path: '/wishlist', icon: Heart, badge: user ? wishlistCount : 0 },
     { label: 'Cart', path: '/cart', icon: ShoppingBag, badge: cartCount },
   ];
 

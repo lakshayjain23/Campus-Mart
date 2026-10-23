@@ -28,16 +28,9 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Password must be at least 6 characters.');
   END IF;
 
-  -- If user already exists in auth.users, update their password and confirm status
+  -- Check if user already exists in auth.users
   IF EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = v_norm_email) THEN
-    v_encrypted_pw := crypt(p_password, gen_salt('bf', 10));
-    UPDATE auth.users 
-    SET encrypted_password = v_encrypted_pw,
-        email_confirmed_at = COALESCE(email_confirmed_at, now()),
-        updated_at = now()
-    WHERE lower(email) = v_norm_email;
-    
-    RETURN jsonb_build_object('success', true, 'message', 'Existing account password updated.');
+    RETURN jsonb_build_object('success', false, 'error', 'An account with this email already exists. Please sign in or use password reset.');
   END IF;
 
   v_user_id := gen_random_uuid();

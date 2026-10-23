@@ -51,7 +51,7 @@ export const PrivacyPage: React.FC = () => {
               <Lock className="w-5 h-5 text-emerald-700 mb-2" />
               <h3 className="font-bold text-slate-900 mb-1">Local Browser Storage</h3>
               <p className="text-slate-600">
-                Wishlist, cart, and offline draft listings are stored securely on your device using standard local browser storage.
+                Cart and offline draft listings are stored securely on your device using local storage, while your wishlist is securely protected and associated with your authenticated student account.
               </p>
             </div>
           </div>

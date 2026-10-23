@@ -22,6 +22,8 @@ const TermsPage = lazy(() => import('./pages/TermsPage').then((m) => ({ default:
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 const SafetyGuidelinesPage = lazy(() => import('./pages/SafetyGuidelinesPage').then((m) => ({ default: m.SafetyGuidelinesPage })));
 const ContactPage = lazy(() => import('./pages/ContactPage').then((m) => ({ default: m.ContactPage })));
+const MessagesPage = lazy(() => import('./pages/MessagesPage').then((m) => ({ default: m.MessagesPage })));
+const ModerationPage = lazy(() => import('./pages/ModerationPage').then((m) => ({ default: m.ModerationPage })));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 
 const PageLoadingFallback: React.FC = () => (
@@ -64,6 +66,8 @@ export const App: React.FC = () => {
                     <Route path="/orders" element={<MyOrdersPage />} />
                     <Route path="/wishlist" element={<WishlistPage />} />
                     <Route path="/cart" element={<CartPage />} />
+                    <Route path="/messages" element={<MessagesPage />} />
+                    <Route path="/moderation" element={<ModerationPage />} />
                     <Route path="/terms" element={<TermsPage />} />
                     <Route path="/privacy" element={<PrivacyPage />} />
                     <Route path="/safety" element={<SafetyGuidelinesPage />} />

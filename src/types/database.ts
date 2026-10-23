@@ -141,6 +141,12 @@ export type Database = {
           seller_year: string | null
           tags: string[] | null
           title: string
+          status: string | null
+          expires_at: string | null
+          updated_at: string | null
+          course_code: string | null
+          semester: string | null
+          category_fields: Json | null
         }
         Insert: {
           campus: string
@@ -168,6 +174,12 @@ export type Database = {
           seller_year?: string | null
           tags?: string[] | null
           title: string
+          status?: string | null
+          expires_at?: string | null
+          updated_at?: string | null
+          course_code?: string | null
+          semester?: string | null
+          category_fields?: Json | null
         }
         Update: {
           campus?: string
@@ -195,6 +207,12 @@ export type Database = {
           seller_year?: string | null
           tags?: string[] | null
           title?: string
+          status?: string | null
+          expires_at?: string | null
+          updated_at?: string | null
+          course_code?: string | null
+          semester?: string | null
+          category_fields?: Json | null
         }
         Relationships: []
       }
@@ -212,6 +230,7 @@ export type Database = {
           verified_student: boolean | null
           rating: number | null
           reviews_count: number | null
+          role: string | null
           created_at: string | null
           updated_at: string | null
         }
@@ -228,6 +247,7 @@ export type Database = {
           verified_student?: boolean | null
           rating?: number | null
           reviews_count?: number | null
+          role?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -244,6 +264,7 @@ export type Database = {
           verified_student?: boolean | null
           rating?: number | null
           reviews_count?: number | null
+          role?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -291,6 +312,146 @@ export type Database = {
         }
         Relationships: []
       }
+      conversations: {
+        Row: {
+          id: string
+          listing_id: string
+          buyer_id: string
+          seller_id: string
+          created_at: string | null
+          updated_at: string | null
+          last_message_text: string | null
+          last_message_at: string | null
+        }
+        Insert: {
+          id?: string
+          listing_id: string
+          buyer_id: string
+          seller_id: string
+          created_at?: string | null
+          updated_at?: string | null
+          last_message_text?: string | null
+          last_message_at?: string | null
+        }
+        Update: {
+          id?: string
+          listing_id?: string
+          buyer_id?: string
+          seller_id?: string
+          created_at?: string | null
+          updated_at?: string | null
+          last_message_text?: string | null
+          last_message_at?: string | null
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          id: string
+          conversation_id: string
+          sender_id: string
+          message_text: string
+          is_meetup_suggestion: boolean | null
+          meetup_location: string | null
+          read_at: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          sender_id: string
+          message_text: string
+          is_meetup_suggestion?: boolean | null
+          meetup_location?: string | null
+          read_at?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          sender_id?: string
+          message_text?: string
+          is_meetup_suggestion?: boolean | null
+          meetup_location?: string | null
+          read_at?: string | null
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      listing_reports: {
+        Row: {
+          id: string
+          listing_id: string
+          reporter_id: string
+          reason: string
+          explanation: string | null
+          status: string | null
+          moderator_notes: string | null
+          resolution_notes: string | null
+          reviewed_by: string | null
+          resolved_by: string | null
+          resolved_at: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          listing_id: string
+          reporter_id: string
+          reason: string
+          explanation?: string | null
+          status?: string | null
+          moderator_notes?: string | null
+          resolution_notes?: string | null
+          reviewed_by?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          listing_id?: string
+          reporter_id?: string
+          reason?: string
+          explanation?: string | null
+          status?: string | null
+          moderator_notes?: string | null
+          resolution_notes?: string | null
+          reviewed_by?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      wishlists: {
+        Row: {
+          id: string
+          user_id: string
+          product_id: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          product_id: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          product_id?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wishlists_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -304,6 +465,16 @@ export type Database = {
           p_college: string
           p_department?: string
         }
+        Returns: Json
+      }
+      renew_listing: {
+        Args: {
+          p_listing_id: string
+        }
+        Returns: Json
+      }
+      expire_stale_listings: {
+        Args: Record<PropertyKey, never>
         Returns: Json
       }
     }

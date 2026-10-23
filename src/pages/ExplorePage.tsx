@@ -32,6 +32,7 @@ export const ExplorePage: React.FC = () => {
 
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory);
   const [conditionFilter, setConditionFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'available' | 'all' | 'reserved' | 'sold'>('available');
   const [searchTerm, setSearchTerm] = useState<string>(initialSearch);
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'popular'>(initialSort);
   const [maxPrice, setMaxPrice] = useState<number>(6000);
@@ -52,6 +53,7 @@ export const ExplorePage: React.FC = () => {
   const handleClearFilters = () => {
     setCategoryFilter('All');
     setConditionFilter('all');
+    setStatusFilter('available');
     setSearchTerm('');
     setGlobalSearch('');
     setMaxPrice(6000);
@@ -59,17 +61,35 @@ export const ExplorePage: React.FC = () => {
     setSearchParams({});
   };
 
-  // Filter & Sort Logic
+  // Filter & Sort Logic with Course Code Search & Status handling
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
-      // Search term
+      // Never show internal archived listings in public search
+      if (product.status === 'archived') {
+        return false;
+      }
+
+      // Status filter
+      if (statusFilter === 'available') {
+        if (product.status === 'sold' || product.status === 'reserved' || product.inStock === false) {
+          return false;
+        }
+      } else if (statusFilter === 'reserved') {
+        if (product.status !== 'reserved') return false;
+      } else if (statusFilter === 'sold') {
+        if (product.status !== 'sold' && product.inStock !== false) return false;
+      }
+
+      // Search term (Matches Title, Description, Category, Tags, and Course Code)
       if (searchTerm.trim()) {
-        const query = searchTerm.toLowerCase();
+        const query = searchTerm.toLowerCase().trim();
         const matchesTitle = product.title.toLowerCase().includes(query);
         const matchesDesc = product.description.toLowerCase().includes(query);
         const matchesCategory = product.category.toLowerCase().includes(query);
         const matchesTags = product.tags.some(t => t.toLowerCase().includes(query));
-        if (!matchesTitle && !matchesDesc && !matchesCategory && !matchesTags) {
+        const matchesCourse = product.courseCode ? product.courseCode.toLowerCase().includes(query) : false;
+        
+        if (!matchesTitle && !matchesDesc && !matchesCategory && !matchesTags && !matchesCourse) {
           return false;
         }
       }
@@ -82,9 +102,25 @@ export const ExplorePage: React.FC = () => {
         }
       }
 
-      // Category filter
-      if (categoryFilter !== 'All' && product.category !== categoryFilter) {
-        return false;
+      // Category filter with alias compatibility
+      if (categoryFilter !== 'All') {
+        const isTextbookMatch =
+          (categoryFilter === 'Course Textbooks' || categoryFilter === 'Books & Study Materials') &&
+          (product.category === 'Course Textbooks' || product.category === 'Books & Study Materials');
+
+        const isDormMatch =
+          (categoryFilter === 'Dorm & Room Essentials' || categoryFilter === 'Hostel Essentials') &&
+          (product.category === 'Dorm & Room Essentials' || product.category === 'Hostel Essentials');
+
+        const isElectronicsMatch =
+          (categoryFilter === 'Electronics & Accessories' || categoryFilter === 'Electronics') &&
+          (product.category === 'Electronics & Accessories' || product.category === 'Electronics');
+
+        const isExactMatch = product.category.toLowerCase() === categoryFilter.toLowerCase();
+
+        if (!isTextbookMatch && !isDormMatch && !isElectronicsMatch && !isExactMatch) {
+          return false;
+        }
       }
 
       // Condition filter
@@ -104,7 +140,7 @@ export const ExplorePage: React.FC = () => {
       if (sortBy === 'popular') return (b.seller.reviewsCount || 0) - (a.seller.reviewsCount || 0);
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [products, searchTerm, selectedCampus, categoryFilter, conditionFilter, maxPrice, sortBy]);
+  }, [products, searchTerm, selectedCampus, categoryFilter, conditionFilter, statusFilter, maxPrice, sortBy]);
 
   const displayedProducts = filteredProducts.slice(0, visibleCount);
   const hasMore = visibleCount < filteredProducts.length;
@@ -117,7 +153,7 @@ export const ExplorePage: React.FC = () => {
     { label: 'Student Made', value: 'student_created' },
   ];
 
-  const hasActiveFilters = categoryFilter !== 'All' || conditionFilter !== 'all' || maxPrice < 6000 || searchTerm !== '';
+  const hasActiveFilters = categoryFilter !== 'All' || conditionFilter !== 'all' || statusFilter !== 'available' || maxPrice < 6000 || searchTerm !== '';
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] py-8">
@@ -129,7 +165,7 @@ export const ExplorePage: React.FC = () => {
               Explore Marketplace
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Browse verified listings across {selectedCampus}
+              Browse textbooks by course code, dorm essentials, and electronics across {selectedCampus}
             </p>
           </div>
 
@@ -145,8 +181,8 @@ export const ExplorePage: React.FC = () => {
         </div>
 
         {/* Top Controls Bar */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-          {/* Search Input inside Explore */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+          {/* Search Input with Course-Code Support */}
           <div className="relative flex-1 max-w-md">
             <input
               type="text"
@@ -155,8 +191,8 @@ export const ExplorePage: React.FC = () => {
                 setSearchTerm(e.target.value);
                 setGlobalSearch(e.target.value);
               }}
-              placeholder="Search in current category or campus..."
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-[#15803D]"
+              placeholder="Search title, course code (e.g. CS201), author, or keyword..."
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-[#15803D]"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             {searchTerm && (
@@ -189,7 +225,7 @@ export const ExplorePage: React.FC = () => {
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
                 aria-label="Sort products"
-                className="py-2 px-3 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 bg-white focus:outline-none focus:border-[#15803D]"
+                className="py-2 px-3 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 bg-white focus:outline-none focus:border-[#15803D]"
               >
                 <option value="newest">Sort: Newest First</option>
                 <option value="price_asc">Price: Low to High</option>
@@ -199,17 +235,17 @@ export const ExplorePage: React.FC = () => {
             </div>
 
             {/* Grid / List View Toggle */}
-            <div className="hidden sm:flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50">
+            <div className="hidden sm:flex items-center border border-slate-200 rounded-xl p-0.5 bg-slate-50">
               <button
                 onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white text-[#064E3B] shadow-2xs' : 'text-slate-400'}`}
+                className={`p-1.5 rounded-lg ${viewMode === 'grid' ? 'bg-white text-[#064E3B] shadow-2xs' : 'text-slate-400'}`}
                 title="Grid view"
               >
                 <LayoutGrid className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white text-[#064E3B] shadow-2xs' : 'text-slate-400'}`}
+                className={`p-1.5 rounded-lg ${viewMode === 'list' ? 'bg-white text-[#064E3B] shadow-2xs' : 'text-slate-400'}`}
                 title="List view"
               >
                 <List className="w-4 h-4" />
@@ -222,28 +258,27 @@ export const ExplorePage: React.FC = () => {
         <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 no-scrollbar">
           <button
             onClick={() => setCategoryFilter('All')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors shrink-0 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors shrink-0 cursor-pointer ${
               categoryFilter === 'All'
                 ? 'bg-[#064E3B] text-white shadow-2xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:border-emerald-300'
             }`}
           >
-            All Categories ({products.length})
+            All Categories ({products.filter(p => p.status !== 'archived').length})
           </button>
           {CATEGORIES.map((cat) => {
             const isSelected = categoryFilter === cat.name;
-            const count = products.filter(p => p.category === cat.name).length;
             return (
               <button
                 key={cat.id}
                 onClick={() => setCategoryFilter(cat.name)}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
+                className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors shrink-0 cursor-pointer ${
                   isSelected
                     ? 'bg-[#064E3B] text-white font-semibold shadow-2xs'
                     : 'bg-white text-slate-700 border border-slate-200 hover:border-emerald-300 hover:text-emerald-900'
                 }`}
               >
-                {cat.name} ({count})
+                {cat.name}
               </button>
             );
           })}
@@ -252,7 +287,7 @@ export const ExplorePage: React.FC = () => {
         {/* Main Grid & Sidebar Layout */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
           {/* Desktop Filter Sidebar */}
-          <div className="hidden md:block bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-6">
+          <div className="hidden md:block bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 uppercase tracking-wider">
                 <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-800" />
@@ -261,7 +296,7 @@ export const ExplorePage: React.FC = () => {
               {hasActiveFilters && (
                 <button
                   onClick={handleClearFilters}
-                  className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
+                  className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer"
                 >
                   <RotateCcw className="w-3 h-3" />
                   Reset
@@ -269,8 +304,37 @@ export const ExplorePage: React.FC = () => {
               )}
             </div>
 
-            {/* Condition Filters */}
+            {/* Listing Status Filter */}
             <div>
+              <label className="block text-xs font-bold text-slate-800 mb-2.5">
+                Listing Availability
+              </label>
+              <div className="space-y-1.5">
+                {[
+                  { value: 'available', label: 'Available Only (Default)' },
+                  { value: 'all', label: 'All Items (Inc. Sold)' },
+                  { value: 'reserved', label: 'Reserved / In Handover' },
+                  { value: 'sold', label: 'Sold / Completed' },
+                ].map((st) => (
+                  <label
+                    key={st.value}
+                    className="flex items-center gap-2 text-xs text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="statusFilter"
+                      checked={statusFilter === st.value}
+                      onChange={() => setStatusFilter(st.value as any)}
+                      className="text-[#15803D] focus:ring-[#15803D]"
+                    />
+                    <span>{st.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Condition Filters */}
+            <div className="pt-4 border-t border-slate-100">
               <label className="block text-xs font-bold text-slate-800 mb-2.5">
                 Item Condition
               </label>
@@ -324,28 +388,28 @@ export const ExplorePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMaxPrice(500)}
-                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded border border-slate-200 text-slate-700"
+                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Under ₹500
                 </button>
                 <button
                   type="button"
                   onClick={() => setMaxPrice(1000)}
-                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded border border-slate-200 text-slate-700"
+                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Under ₹1,000
                 </button>
                 <button
                   type="button"
                   onClick={() => setMaxPrice(2500)}
-                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded border border-slate-200 text-slate-700"
+                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Under ₹2,500
                 </button>
                 <button
                   type="button"
                   onClick={() => setMaxPrice(6000)}
-                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded border border-slate-200 text-slate-700"
+                  className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Any Budget
                 </button>
@@ -357,35 +421,41 @@ export const ExplorePage: React.FC = () => {
           <div className="md:col-span-3">
             {/* Active filter badges strip */}
             {hasActiveFilters && (
-              <div className="flex flex-wrap items-center gap-2 mb-4 p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs">
+              <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs">
                 <span className="font-semibold text-emerald-900">Active Filters:</span>
                 {categoryFilter !== 'All' && (
-                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded text-emerald-800 border border-emerald-200 font-medium">
+                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
                     Category: {categoryFilter}
                     <X className="w-3 h-3 cursor-pointer" onClick={() => setCategoryFilter('All')} />
                   </span>
                 )}
+                {statusFilter !== 'available' && (
+                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
+                    Status: {statusFilter}
+                    <X className="w-3 h-3 cursor-pointer" onClick={() => setStatusFilter('available')} />
+                  </span>
+                )}
                 {conditionFilter !== 'all' && (
-                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded text-emerald-800 border border-emerald-200 font-medium">
+                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
                     Condition: {conditionFilter}
                     <X className="w-3 h-3 cursor-pointer" onClick={() => setConditionFilter('all')} />
                   </span>
                 )}
                 {maxPrice < 6000 && (
-                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded text-emerald-800 border border-emerald-200 font-medium">
+                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
                     Under ₹{maxPrice}
                     <X className="w-3 h-3 cursor-pointer" onClick={() => setMaxPrice(6000)} />
                   </span>
                 )}
                 {searchTerm && (
-                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded text-emerald-800 border border-emerald-200 font-medium">
+                  <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
                     "{searchTerm}"
                     <X className="w-3 h-3 cursor-pointer" onClick={() => { setSearchTerm(''); setGlobalSearch(''); }} />
                   </span>
                 )}
                 <button
                   onClick={handleClearFilters}
-                  className="text-xs text-emerald-700 underline ml-auto font-medium"
+                  className="text-xs text-emerald-700 underline ml-auto font-medium cursor-pointer"
                 >
                   Clear All
                 </button>
@@ -410,17 +480,17 @@ export const ExplorePage: React.FC = () => {
               </div>
             ) : (
               /* Empty state */
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-                <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">
+              <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center shadow-xs">
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">
                   <Search className="w-8 h-8" />
                 </div>
                 <h3 className="text-lg font-bold text-slate-900 mb-1">No Listings Found</h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6">
-                  We couldn’t find any items matching your selected filters or search terms. Try adjusting the price range or category.
+                  We couldn’t find any items matching your search or filters. Try searching by course code (e.g. CS201), resetting the price slider, or changing category.
                 </p>
                 <button
                   onClick={handleClearFilters}
-                  className="px-5 py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-semibold rounded-full shadow-xs transition-colors"
+                  className="px-5 py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-semibold rounded-full shadow-xs transition-colors cursor-pointer"
                 >
                   Reset All Filters
                 </button>
@@ -432,7 +502,7 @@ export const ExplorePage: React.FC = () => {
               <div className="text-center mt-10">
                 <button
                   onClick={() => setVisibleCount((prev) => prev + 6)}
-                  className="px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-semibold text-xs rounded-full shadow-2xs hover:shadow-xs transition-all"
+                  className="px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-semibold text-xs rounded-full shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                 >
                   Load More Listings ({filteredProducts.length - displayedProducts.length} remaining)
                 </button>
@@ -446,7 +516,7 @@ export const ExplorePage: React.FC = () => {
       {mobileFilterOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex justify-end">
           <div className="w-full max-w-xs bg-white h-full p-5 flex flex-col justify-between shadow-2xl">
-            <div>
+            <div className="overflow-y-auto">
               <div className="flex items-center justify-between pb-4 border-b border-slate-200 mb-4">
                 <h3 className="font-bold text-slate-900 text-sm">Filters</h3>
                 <button
@@ -455,6 +525,30 @@ export const ExplorePage: React.FC = () => {
                 >
                   <X className="w-5 h-5" />
                 </button>
+              </div>
+
+              {/* Status */}
+              <div className="mb-6">
+                <label className="block text-xs font-bold text-slate-800 mb-2">Availability</label>
+                <div className="space-y-2">
+                  {[
+                    { value: 'available', label: 'Available Only' },
+                    { value: 'all', label: 'All Items' },
+                    { value: 'reserved', label: 'Reserved' },
+                    { value: 'sold', label: 'Sold' },
+                  ].map((st) => (
+                    <label key={st.value} className="flex items-center gap-2 text-xs text-slate-700">
+                      <input
+                        type="radio"
+                        name="mobileStatus"
+                        checked={statusFilter === st.value}
+                        onChange={() => setStatusFilter(st.value as any)}
+                        className="text-[#15803D]"
+                      />
+                      <span>{st.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {/* Conditions */}
@@ -513,3 +607,5 @@ export const ExplorePage: React.FC = () => {
     </div>
   );
 };
+
+export default ExplorePage;

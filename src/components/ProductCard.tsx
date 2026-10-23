@@ -35,17 +35,35 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, compact = fal
           />
         </Link>
 
+        {/* Status Overlay or Badge */}
+        {product.status === 'sold' && (
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] z-10 flex items-center justify-center">
+            <span className="bg-rose-600 text-white text-xs sm:text-sm font-bold uppercase tracking-wider px-3 py-1 rounded-full shadow-lg">
+              Sold Out
+            </span>
+          </div>
+        )}
+        {product.status === 'reserved' && (
+          <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 z-20">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-semibold bg-amber-500 text-white shadow-xs">
+              Reserved
+            </span>
+          </div>
+        )}
+
         {/* Condition pill */}
-        <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 z-10">
-          <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border shadow-xs backdrop-blur-xs ${badge.bg}`}>
-            {badge.icon ? (
-              <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-purple-600" />
-            ) : (
-              <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-            )}
-            <span className="truncate max-w-[80px] sm:max-w-none">{badge.label}</span>
-          </span>
-        </div>
+        {product.status !== 'reserved' && (
+          <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 z-10">
+            <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border shadow-xs backdrop-blur-xs ${badge.bg}`}>
+              {badge.icon ? (
+                <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-purple-600" />
+              ) : (
+                <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+              )}
+              <span className="truncate max-w-[80px] sm:max-w-none">{badge.label}</span>
+            </span>
+          </div>
+        )}
 
         {/* Wishlist button */}
         <button
@@ -83,9 +101,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, compact = fal
         <div>
           {/* Category & Campus */}
           <div className="flex items-center justify-between text-[10px] sm:text-xs text-slate-500 mb-1 sm:mb-1.5 gap-1">
-            <span className="font-semibold text-emerald-800 uppercase tracking-wider text-[10px] sm:text-[11px] truncate">
-              {product.category}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-semibold text-emerald-800 uppercase tracking-wider text-[10px] sm:text-[11px] truncate">
+                {product.category}
+              </span>
+              {product.courseCode && (
+                <span className="bg-blue-50 text-blue-700 font-mono text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded border border-blue-200 shrink-0">
+                  {product.courseCode}
+                </span>
+              )}
+            </div>
             <span className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-[11px] text-slate-500 shrink-0">
               <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-slate-400" />
               <span className="truncate max-w-[65px] sm:max-w-[110px]">{product.seller.hostel.split(',')[0]}</span>
