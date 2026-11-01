@@ -632,6 +632,14 @@ function saveLocalReports(reports: any[]) {
 }
 
 /**
+ * Helper to validate UUID format
+ */
+export function isValidUuid(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+/**
  * Get or create a private conversation for a listing between buyer and seller
  */
 export async function getOrCreateConversation(
@@ -640,9 +648,20 @@ export async function getOrCreateConversation(
   buyerId: string
 ): Promise<string> {
   if (sellerId === buyerId) {
-    throw new Error('You cannot start a conversation with yourself.');
+    throw new Error('You cannot start a conversation with yourself for your own listing.');
   }
 
+  if (!isValidUuid(buyerId)) {
+    throw new Error('Please sign in with a verified student account to start a conversation.');
+  }
+
+  if (!isValidUuid(sellerId)) {
+    throw new Error(
+      'This item is a catalog demo product and does not have an active student seller account. To test live chat, please click "Chat in App" on a product created by another campus student (or post a listing from the Sell page).'
+    );
+  }
+
+  // 1. Try to find existing conversation for this listing and buyer
   const { data: existing, error: findErr } = await (supabase as any)
     .from('conversations')
     .select('id')
@@ -661,11 +680,12 @@ export async function getOrCreateConversation(
       findErr.code === 'PGRST205'
     ) {
       throw new Error(
-        'In-app messaging requires the database migration to be applied in Supabase. Please run the migration script.'
+        "In-app messaging requires the database migration to be applied in Supabase. Please apply migration 20261101010000_in_app_messaging.sql in the Supabase SQL Editor."
       );
     }
   }
 
+  // 2. Create new conversation
   const { data: created, error: createErr } = await (supabase as any)
     .from('conversations')
     .insert({
@@ -674,20 +694,33 @@ export async function getOrCreateConversation(
       buyer_id: buyerId,
       last_message_text: 'Conversation initiated',
       last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
     .select('id')
     .single();
 
   if (createErr) {
+    if (createErr.code === '23505') {
+      // Unique constraint conflict - fetch existing
+      const { data: retryExisting } = await (supabase as any)
+        .from('conversations')
+        .select('id')
+        .eq('listing_id', listingId)
+        .eq('buyer_id', buyerId)
+        .maybeSingle();
+      if (retryExisting?.id) return retryExisting.id;
+    }
+
     if (
       createErr.message?.includes('not find the table') ||
       createErr.code === '42P01' ||
       createErr.code === 'PGRST205'
     ) {
       throw new Error(
-        'In-app messaging requires the database migration to be applied in Supabase. Please run the migration script.'
+        "In-app messaging requires the database migration to be applied in Supabase. Please apply migration 20261101010000_in_app_messaging.sql in the Supabase SQL Editor."
       );
     }
+
     throw new Error(createErr.message || 'Could not start conversation.');
   }
 
@@ -695,86 +728,126 @@ export async function getOrCreateConversation(
 }
 
 /**
- * Fetch all conversations involving the user
+ * Fetch all conversations involving the user with enriched participant and listing data
  */
 export async function fetchUserConversations(userId: string): Promise<ConversationItem[]> {
-  try {
-    const { data, error } = await (supabase as any)
-      .from('conversations')
-      .select('*')
-      .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
-      .order('updated_at', { ascending: false });
+  const { data, error } = await (supabase as any)
+    .from('conversations')
+    .select('*')
+    .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
+    .order('updated_at', { ascending: false });
 
-    if (error) {
-      if (
-        error.message?.includes('not find the table') ||
-        error.code === '42P01' ||
-        error.code === 'PGRST205'
-      ) {
-        console.info('Conversations table pending database migration.');
-        return [];
-      }
-      throw error;
+  if (error) {
+    if (
+      error.message?.includes('not find the table') ||
+      error.code === '42P01' ||
+      error.code === 'PGRST205'
+    ) {
+      throw new Error(
+        "The 'conversations' table has not yet been created in your Supabase project. Please apply migration 20261101010000_in_app_messaging.sql in the Supabase SQL Editor."
+      );
     }
+    throw new Error(error.message || 'Failed to fetch conversations from Supabase.');
+  }
 
-    if (data) {
-      return data.map((row: any) => ({
-        id: row.id,
-        listingId: row.listing_id,
-        buyerId: row.buyer_id,
-        sellerId: row.seller_id,
-        lastMessageText: row.last_message_text || '',
-        lastMessageAt: row.last_message_at || row.created_at,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
-    }
-    return [];
-  } catch (err) {
-    console.warn('Conversations fetch notice:', err);
+  if (!data || data.length === 0) {
     return [];
   }
+
+  // Collect other user IDs and listing IDs for rich preview
+  const otherUserIds: string[] = Array.from(
+    new Set(data.map((row: any) => (row.buyer_id === userId ? row.seller_id : row.buyer_id)).filter(Boolean))
+  ) as string[];
+  const listingIds: string[] = Array.from(
+    new Set(data.map((row: any) => row.listing_id).filter(Boolean))
+  ) as string[];
+
+  const [profilesRes, productsRes] = await Promise.all([
+    otherUserIds.length > 0
+      ? supabase.from('profiles').select('id, full_name, college, avatar_url').in('id', otherUserIds)
+      : Promise.resolve({ data: [] }),
+    listingIds.length > 0
+      ? supabase.from('products').select('id, title, price, images, campus').in('id', listingIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const profilesMap = new Map<string, any>();
+  if (profilesRes.data) {
+    profilesRes.data.forEach((p: any) => profilesMap.set(p.id, p));
+  }
+
+  const productsMap = new Map<string, any>();
+  if (productsRes.data) {
+    productsRes.data.forEach((p: any) => productsMap.set(p.id, p));
+  }
+
+  return data.map((row: any) => {
+    const otherId = row.buyer_id === userId ? row.seller_id : row.buyer_id;
+    const prof = profilesMap.get(otherId);
+    const prod = productsMap.get(row.listing_id);
+
+    return {
+      id: row.id,
+      listingId: row.listing_id,
+      buyerId: row.buyer_id,
+      sellerId: row.seller_id,
+      lastMessageText: row.last_message_text || 'No messages yet',
+      lastMessageAt: row.last_message_at || row.updated_at || row.created_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      otherUser: {
+        name: prof?.full_name || (row.buyer_id === userId ? 'Student Seller' : 'Student Buyer'),
+        avatarUrl: prof?.avatar_url || undefined,
+        college: prof?.college || undefined,
+      },
+      listing: prod
+        ? {
+            title: prod.title,
+            price: Number(prod.price),
+            image: prod.images?.[0] || '',
+            campus: prod.campus || '',
+          }
+        : undefined,
+    };
+  });
 }
 
 /**
  * Fetch messages for a specific conversation
  */
 export async function fetchConversationMessages(conversationId: string): Promise<MessageItem[]> {
-  try {
-    const { data, error } = await (supabase as any)
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+  const { data, error } = await (supabase as any)
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
 
-    if (error) {
-      if (
-        error.message?.includes('not find the table') ||
-        error.code === '42P01' ||
-        error.code === 'PGRST205'
-      ) {
-        return [];
-      }
-      throw error;
+  if (error) {
+    if (
+      error.message?.includes('not find the table') ||
+      error.code === '42P01' ||
+      error.code === 'PGRST205'
+    ) {
+      throw new Error(
+        "The 'messages' table is pending database migration in Supabase. Please apply migration 20261101010000_in_app_messaging.sql."
+      );
     }
-
-    if (data) {
-      return data.map((m: any) => ({
-        id: m.id,
-        conversationId: m.conversation_id,
-        senderId: m.sender_id,
-        messageText: m.message_text,
-        isMeetupSuggestion: Boolean(m.is_meetup_suggestion),
-        meetupLocation: m.meetup_location || undefined,
-        createdAt: m.created_at,
-        readAt: m.read_at,
-      }));
-    }
-    return [];
-  } catch (err) {
-    console.warn('Messages fetch notice:', err);
-    return [];
+    throw new Error(error.message || 'Failed to load conversation messages.');
   }
+
+  if (data) {
+    return data.map((m: any) => ({
+      id: m.id,
+      conversationId: m.conversation_id,
+      senderId: m.sender_id,
+      messageText: m.message_text,
+      isMeetupSuggestion: Boolean(m.is_meetup_suggestion),
+      meetupLocation: m.meetup_location || undefined,
+      createdAt: m.created_at,
+      readAt: m.read_at,
+    }));
+  }
+  return [];
 }
 
 /**
@@ -787,10 +860,15 @@ export async function sendMessage(payload: {
   isMeetupSuggestion?: boolean;
   meetupLocation?: string;
 }): Promise<MessageItem> {
+  const trimmed = payload.messageText.trim();
+  if (!trimmed) {
+    throw new Error('Message cannot be empty.');
+  }
+
   const insertPayload = {
     conversation_id: payload.conversationId,
     sender_id: payload.senderId,
-    message_text: payload.messageText,
+    message_text: trimmed,
     is_meetup_suggestion: payload.isMeetupSuggestion ?? false,
     meetup_location: payload.meetupLocation || null,
   };
@@ -819,7 +897,7 @@ export async function sendMessage(payload: {
   (supabase as any)
     .from('conversations')
     .update({
-      last_message_text: payload.messageText,
+      last_message_text: trimmed,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

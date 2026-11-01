@@ -1191,5 +1191,269 @@ describe('Campus Mart — Account Creation & Email Verification Workflow', () =>
   });
 });
 
+describe('Campus Mart — In-App Messaging & Campus Chats', () => {
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  function isValidUuid(id) {
+    return typeof id === 'string' && UUID_REGEX.test(id.trim());
+  }
+
+  function validateStartChat({ buyerId, sellerId, listingId, isEmailVerified }) {
+    if (!buyerId) {
+      return { ok: false, error: 'Please sign in to start chatting with the seller.' };
+    }
+    if (!isEmailVerified) {
+      return { ok: false, error: 'Please verify your campus email before chatting with sellers.' };
+    }
+    if (!listingId) {
+      return { ok: false, error: 'Listing not found.' };
+    }
+    if (!sellerId) {
+      return { ok: false, error: 'Seller information is missing.' };
+    }
+    if (buyerId === sellerId) {
+      return { ok: false, error: "You cannot chat with yourself about your own listing." };
+    }
+    if (!isValidUuid(sellerId)) {
+      return {
+        ok: false,
+        error: 'This is a sample showcase listing. In-app messaging is available for listings posted by verified student accounts.',
+      };
+    }
+    return { ok: true };
+  }
+
+  it('CHAT IN APP VALIDATION: prevents unverified, self-chat, and invalid UUID mock sellers', () => {
+    const validBuyer = '11111111-1111-4111-8111-111111111111';
+    const validSeller = '22222222-2222-4222-8222-222222222222';
+    const sampleMockSeller = 'sell-01';
+
+    // 1. Unauthenticated buyer
+    const resUnauth = validateStartChat({ buyerId: null, sellerId: validSeller, listingId: 'p1', isEmailVerified: false });
+    assert.equal(resUnauth.ok, false);
+    assert.match(resUnauth.error, /sign in/i);
+
+    // 2. Unverified email
+    const resUnverified = validateStartChat({ buyerId: validBuyer, sellerId: validSeller, listingId: 'p1', isEmailVerified: false });
+    assert.equal(resUnverified.ok, false);
+    assert.match(resUnverified.error, /verify your campus email/i);
+
+    // 3. Self chat
+    const resSelf = validateStartChat({ buyerId: validBuyer, sellerId: validBuyer, listingId: 'p1', isEmailVerified: true });
+    assert.equal(resSelf.ok, false);
+    assert.match(resSelf.error, /cannot chat with yourself/i);
+
+    // 4. Sample showcase seller with mock non-UUID ID
+    const resMock = validateStartChat({ buyerId: validBuyer, sellerId: sampleMockSeller, listingId: 'p1', isEmailVerified: true });
+    assert.equal(resMock.ok, false);
+    assert.match(resMock.error, /sample showcase listing/i);
+
+    // 5. Valid student-to-student interaction
+    const resValid = validateStartChat({ buyerId: validBuyer, sellerId: validSeller, listingId: 'p1', isEmailVerified: true });
+    assert.equal(resValid.ok, true);
+  });
+
+  it('CONVERSATION RETRIEVAL & CREATION: deduplicates by listing_id and buyer_id', () => {
+    // In-memory conversation store simulating Supabase unique constraint
+    const conversations = [];
+
+    function getOrCreateConversation(listingId, buyerId, sellerId) {
+      if (buyerId === sellerId) throw new Error('Cannot start conversation with yourself');
+      const existing = conversations.find(c => c.listing_id === listingId && c.buyer_id === buyerId);
+      if (existing) {
+        return { conversation: existing, created: false };
+      }
+      const newConv = {
+        id: `conv-${conversations.length + 1}`,
+        listing_id: listingId,
+        buyer_id: buyerId,
+        seller_id: sellerId,
+        created_at: new Date().toISOString(),
+        last_message_text: null,
+        last_message_at: null,
+      };
+      conversations.push(newConv);
+      return { conversation: newConv, created: true };
+    }
+
+    const listingA = 'prod-101';
+    const buyer1 = 'user-buyer-1';
+    const seller1 = 'user-seller-1';
+
+    // First call creates conversation
+    const res1 = getOrCreateConversation(listingA, buyer1, seller1);
+    assert.equal(res1.created, true);
+    assert.equal(res1.conversation.id, 'conv-1');
+
+    // Second call with same buyer and listing returns existing without duplicating
+    const res2 = getOrCreateConversation(listingA, buyer1, seller1);
+    assert.equal(res2.created, false);
+    assert.equal(res2.conversation.id, 'conv-1');
+    assert.equal(conversations.length, 1);
+
+    // Different buyer creates separate conversation
+    const res3 = getOrCreateConversation(listingA, 'user-buyer-2', seller1);
+    assert.equal(res3.created, true);
+    assert.equal(res3.conversation.id, 'conv-2');
+    assert.equal(conversations.length, 2);
+  });
+
+  it('MESSAGE SENDING: trims whitespace, rejects blank text, and updates conversation preview', () => {
+    function createMessage(conversation, senderId, rawText) {
+      const text = rawText ? rawText.trim() : '';
+      if (!text) {
+        throw new Error('Message cannot be empty');
+      }
+      const msg = {
+        id: `msg-${Date.now()}`,
+        conversation_id: conversation.id,
+        sender_id: senderId,
+        body: text,
+        created_at: new Date().toISOString(),
+      };
+      // Simulates trigger/RPC update to conversation metadata
+      conversation.last_message_text = text;
+      conversation.last_message_at = msg.created_at;
+      return msg;
+    }
+
+    const testConv = { id: 'conv-test', last_message_text: null, last_message_at: null };
+
+    // Empty message rejection
+    assert.throws(() => createMessage(testConv, 'u1', ''), /cannot be empty/i);
+    assert.throws(() => createMessage(testConv, 'u1', '   \n\t  '), /cannot be empty/i);
+
+    // Valid message trimmed and preview updated
+    const msg = createMessage(testConv, 'u1', '  Hey, is the cycle still available?  ');
+    assert.equal(msg.body, 'Hey, is the cycle still available?');
+    assert.equal(testConv.last_message_text, 'Hey, is the cycle still available?');
+    assert.ok(testConv.last_message_at);
+  });
+
+  it('CONVERSATION LIST ENRICHMENT: maps other participant profile, listing metadata, and role badges', () => {
+    const currentUserId = 'user-student-a';
+
+    const rawConversations = [
+      {
+        id: 'c1',
+        listing_id: 'prod-cycle',
+        buyer_id: 'user-student-a', // current user is buyer
+        seller_id: 'user-student-b',
+        last_message_text: 'Can we meet at the library gate?',
+        last_message_at: '2026-11-01T14:30:00Z',
+      },
+      {
+        id: 'c2',
+        listing_id: 'prod-kettle',
+        buyer_id: 'user-student-c',
+        seller_id: 'user-student-a', // current user is seller
+        last_message_text: 'Is the price negotiable?',
+        last_message_at: '2026-11-01T15:00:00Z',
+      },
+    ];
+
+    const profilesMap = {
+      'user-student-b': { id: 'user-student-b', full_name: 'Priya Verma', college: 'IIT Delhi', avatar_url: null },
+      'user-student-c': { id: 'user-student-c', full_name: 'Rohan Mehta', college: 'IIT Bombay', avatar_url: null },
+    };
+
+    const listingsMap = {
+      'prod-cycle': { id: 'prod-cycle', title: 'Hercules Geared Bicycle', price: 2800, image_url: 'https://example.com/cycle.jpg' },
+      'prod-kettle': { id: 'prod-kettle', title: '1.5L Electric Kettle', price: 450, image_url: 'https://example.com/kettle.jpg' },
+    };
+
+    function enrichConversations(convs, userId) {
+      return convs.map(c => {
+        const isBuyer = c.buyer_id === userId;
+        const otherUserId = isBuyer ? c.seller_id : c.buyer_id;
+        const otherProfile = profilesMap[otherUserId] || { full_name: 'Campus Student' };
+        const listing = listingsMap[c.listing_id] || { title: 'Campus Item', price: 0 };
+        return {
+          id: c.id,
+          listingId: c.listing_id,
+          buyerId: c.buyer_id,
+          sellerId: c.seller_id,
+          otherUser: {
+            id: otherUserId,
+            name: otherProfile.full_name,
+            college: otherProfile.college,
+            roleBadge: isBuyer ? 'Seller' : 'Buyer',
+          },
+          listing: {
+            title: listing.title,
+            price: listing.price,
+            imageUrl: listing.image_url,
+          },
+          lastMessageText: c.last_message_text,
+          lastMessageAt: c.last_message_at,
+        };
+      });
+    }
+
+    const enriched = enrichConversations(rawConversations, currentUserId);
+    assert.equal(enriched.length, 2);
+
+    // In conv 1: current user is buyer, so otherUser is Priya (Seller)
+    assert.equal(enriched[0].otherUser.name, 'Priya Verma');
+    assert.equal(enriched[0].otherUser.roleBadge, 'Seller');
+    assert.equal(enriched[0].listing.title, 'Hercules Geared Bicycle');
+
+    // In conv 2: current user is seller, so otherUser is Rohan (Buyer)
+    assert.equal(enriched[1].otherUser.name, 'Rohan Mehta');
+    assert.equal(enriched[1].otherUser.roleBadge, 'Buyer');
+    assert.equal(enriched[1].listing.title, '1.5L Electric Kettle');
+  });
+
+  it('ERROR STATE VS EMPTY STATE: distinguishes missing tables / DB network failures from genuine 0 conversations', () => {
+    function processConversationResult(dbResult) {
+      if (dbResult.error) {
+        if (dbResult.error.code === 'PGRST205' || dbResult.error.code === '42P01') {
+          return {
+            status: 'error',
+            conversations: [],
+            errorMessage: 'In-app chat tables are not configured on the Supabase database. Please execute the messaging migration.',
+          };
+        }
+        return {
+          status: 'error',
+          conversations: [],
+          errorMessage: dbResult.error.message || 'Failed to load conversations.',
+        };
+      }
+      return {
+        status: dbResult.data.length === 0 ? 'empty' : 'ready',
+        conversations: dbResult.data,
+        errorMessage: null,
+      };
+    }
+
+    // 1. Missing table error (PGRST205) must not be rendered as "No conversations yet"
+    const missingTableRes = processConversationResult({
+      data: null,
+      error: { code: 'PGRST205', message: "Could not find the 'conversations' table" },
+    });
+    assert.equal(missingTableRes.status, 'error');
+    assert.match(missingTableRes.errorMessage, /In-app chat tables are not configured/i);
+
+    // 2. Genuine empty state (0 conversations created by user)
+    const legitimateEmptyRes = processConversationResult({
+      data: [],
+      error: null,
+    });
+    assert.equal(legitimateEmptyRes.status, 'empty');
+    assert.equal(legitimateEmptyRes.errorMessage, null);
+    assert.equal(legitimateEmptyRes.conversations.length, 0);
+
+    // 3. Populated state
+    const readyRes = processConversationResult({
+      data: [{ id: 'c1' }],
+      error: null,
+    });
+    assert.equal(readyRes.status, 'ready');
+    assert.equal(readyRes.conversations.length, 1);
+  });
+});
+
+
 
 

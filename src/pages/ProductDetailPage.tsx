@@ -19,13 +19,14 @@ import {
   X,
   BookOpen,
   Info,
+  Loader2,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { useAuth } from '../context/AuthContext';
 import { ProductCard } from '../components/ProductCard';
 import { getConditionBadge } from '../lib/utils';
 import { EnquiryModal } from '../components/EnquiryModal';
-import { submitListingReport } from '../lib/supabase';
+import { submitListingReport, getOrCreateConversation, isValidUuid } from '../lib/supabase';
 
 export const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -39,6 +40,8 @@ export const ProductDetailPage: React.FC = () => {
   const [enquiryOpen, setEnquiryOpen] = useState(false);
   const [addedToCartToast, setAddedToCartToast] = useState(false);
   const [copiedLinkToast, setCopiedLinkToast] = useState(false);
+  const [isInitiatingChat, setIsInitiatingChat] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Reporting State
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -96,7 +99,7 @@ export const ProductDetailPage: React.FC = () => {
     setTimeout(() => setCopiedLinkToast(false), 2500);
   };
 
-  const handleChatWithSeller = () => {
+  const handleChatWithSeller = async () => {
     if (!user) {
       openAuthModal('signin');
       return;
@@ -105,7 +108,32 @@ export const ProductDetailPage: React.FC = () => {
       openAuthModal('verify');
       return;
     }
-    navigate(`/messages?listingId=${product.id}&sellerId=${product.seller.id}`);
+
+    const sellerId = product.seller.id;
+    if (user.id === sellerId) {
+      setChatError('You cannot start a conversation with yourself for your own listing.');
+      return;
+    }
+
+    if (!isValidUuid(sellerId)) {
+      setChatError(
+        'This item is a catalog demo product and does not have an active student seller account. To test live chat, please click "Chat in App" on a product created by another campus student (or post a listing from the Sell page).'
+      );
+      return;
+    }
+
+    setIsInitiatingChat(true);
+    setChatError(null);
+
+    try {
+      const convId = await getOrCreateConversation(product.id, sellerId, user.id);
+      navigate(`/messages?conversationId=${convId}&listingId=${product.id}&sellerId=${sellerId}`);
+    } catch (err: any) {
+      console.error('Chat initiation error:', err);
+      setChatError(err.message || 'Could not start conversation with seller.');
+    } finally {
+      setIsInitiatingChat(false);
+    }
   };
 
   const handleOpenEnquiry = () => {
@@ -352,14 +380,40 @@ export const ProductDetailPage: React.FC = () => {
 
               {/* Primary Call to Actions */}
               <div className="space-y-3 pt-2">
+                {chatError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-start justify-between gap-2 animate-in fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <span className="leading-relaxed">{chatError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setChatError(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* In-App Direct Chat */}
                   <button
                     onClick={handleChatWithSeller}
-                    className="w-full py-3.5 px-5 bg-[#064E3B] hover:bg-[#15803D] text-white rounded-xl font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                    disabled={isInitiatingChat}
+                    className="w-full py-3.5 px-5 bg-[#064E3B] hover:bg-[#15803D] disabled:opacity-60 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <MessageCircle className="w-4 h-4 text-[#22C55E]" />
-                    <span>Chat in App</span>
+                    {isInitiatingChat ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
+                        <span>Opening Chat...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MessageCircle className="w-4 h-4 text-[#22C55E]" />
+                        <span>Chat in App</span>
+                      </>
+                    )}
                   </button>
 
                   {/* Add to Cart / Reservation */}
