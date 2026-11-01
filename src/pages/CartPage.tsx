@@ -21,7 +21,7 @@ import { submitReservation } from '../lib/supabase';
 
 export const CartPage: React.FC = () => {
   const { cart, removeFromCart, updateCartQuantity, clearCart, cartTotal, selectedCampus } = useMarketplace();
-  const { user, profile, openAuthModal } = useAuth();
+  const { user, profile, isEmailVerified, openAuthModal } = useAuth();
 
   const [pickupSlot, setPickupSlot] = useState('Today 5:00 PM - SAC / Central Canteen');
   const [confirmedModalOpen, setConfirmedModalOpen] = useState(false);
@@ -35,6 +35,11 @@ export const CartPage: React.FC = () => {
 
     if (!user) {
       openAuthModal('signin');
+      return;
+    }
+
+    if (!isEmailVerified) {
+      openAuthModal('verify');
       return;
     }
 
@@ -239,6 +244,25 @@ export const CartPage: React.FC = () => {
                   <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
                     <span>{checkoutError}</span>
+                  </div>
+                )}
+
+                {user && !isEmailVerified && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1.5">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Email verification required</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      Please verify your email ({user.email}) to place reservations and coordinate on-campus pickups.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => openAuthModal('verify')}
+                      className="w-full mt-1 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      Verify Email to Complete Reservation →
+                    </button>
                   </div>
                 )}
 

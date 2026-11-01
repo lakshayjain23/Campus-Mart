@@ -33,7 +33,7 @@ export const ProductDetailPage: React.FC = () => {
   const { products, toggleWishlist, isInWishlist, addToCart } = useMarketplace();
 
   const product = products.find((p) => p.id === id);
-  const { user, openAuthModal } = useAuth();
+  const { user, isEmailVerified, openAuthModal } = useAuth();
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [enquiryOpen, setEnquiryOpen] = useState(false);
@@ -76,6 +76,7 @@ export const ProductDetailPage: React.FC = () => {
 
   const isSold = product.status === 'sold';
   const isReserved = product.status === 'reserved';
+  const isUnavailable = isSold || isReserved || product.status === 'archived' || product.inStock === false;
 
   // Related products
   const relatedProducts = products
@@ -83,7 +84,7 @@ export const ProductDetailPage: React.FC = () => {
     .slice(0, 4);
 
   const handleAddToCart = () => {
-    if (isSold) return;
+    if (isUnavailable) return;
     addToCart(product, 1);
     setAddedToCartToast(true);
     setTimeout(() => setAddedToCartToast(false), 2500);
@@ -100,7 +101,35 @@ export const ProductDetailPage: React.FC = () => {
       openAuthModal('signin');
       return;
     }
+    if (!isEmailVerified) {
+      openAuthModal('verify');
+      return;
+    }
     navigate(`/messages?listingId=${product.id}&sellerId=${product.seller.id}`);
+  };
+
+  const handleOpenEnquiry = () => {
+    if (!user) {
+      openAuthModal('signin');
+      return;
+    }
+    if (!isEmailVerified) {
+      openAuthModal('verify');
+      return;
+    }
+    setEnquiryOpen(true);
+  };
+
+  const handleOpenReport = () => {
+    if (!user) {
+      openAuthModal('signin');
+      return;
+    }
+    if (!isEmailVerified) {
+      openAuthModal('verify');
+      return;
+    }
+    setReportModalOpen(true);
   };
 
   const handleReportSubmit = async (e: React.FormEvent) => {
@@ -336,22 +365,30 @@ export const ProductDetailPage: React.FC = () => {
                   {/* Add to Cart / Reservation */}
                   <button
                     onClick={handleAddToCart}
-                    disabled={isSold}
+                    disabled={isUnavailable}
                     className={`w-full py-3.5 px-5 rounded-xl font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 ${
-                      isSold
+                      isUnavailable
                         ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                         : 'bg-[#15803D] hover:bg-[#16A34A] text-white'
                     }`}
                   >
                     <ShoppingBag className="w-4 h-4" />
-                    <span>{isSold ? 'Item Sold' : 'Add to Cart / Reserve'}</span>
+                    <span>
+                      {isSold
+                        ? 'Item Sold'
+                        : isReserved
+                        ? 'Item Reserved'
+                        : !product.inStock
+                        ? 'Out of Stock'
+                        : 'Add to Cart / Reserve'}
+                    </span>
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
                   <button
-                    onClick={() => setEnquiryOpen(true)}
-                    className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold hover:underline inline-flex items-center gap-1"
+                    onClick={handleOpenEnquiry}
+                    className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                     <span>Send quick email enquiry instead</span>
@@ -504,8 +541,8 @@ export const ProductDetailPage: React.FC = () => {
                 <span>Safe student marketplace</span>
                 <button
                   type="button"
-                  onClick={() => setReportModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-slate-500 hover:text-rose-600 font-medium transition-colors"
+                  onClick={handleOpenReport}
+                  className="inline-flex items-center gap-1.5 text-slate-500 hover:text-rose-600 font-medium transition-colors cursor-pointer"
                 >
                   <Flag className="w-3.5 h-3.5" />
                   <span>Report this listing</span>

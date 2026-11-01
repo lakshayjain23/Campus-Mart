@@ -27,6 +27,7 @@ import { validateListingContent, validateImageFile } from '../lib/guardrails';
 import type { Condition, Product } from '../types/product';
 import { CATEGORIES } from '../data/mockProducts';
 import { ProductCard } from '../components/ProductCard';
+import { EmailVerificationGuard } from '../components/EmailVerificationGuard';
 
 function get21DayExpiryIso(): string {
   const d = new Date();
@@ -42,7 +43,7 @@ function get21DayExpiryFormatted(): string {
 
 export const SellPage: React.FC = () => {
   const { addProduct, campuses, addCampus, selectedCampus } = useMarketplace();
-  const { user, profile, openAuthModal } = useAuth();
+  const { user, profile, isEmailVerified, openAuthModal } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,14 +80,20 @@ export const SellPage: React.FC = () => {
   const [electronicsModel, setElectronicsModel] = useState('');
   const [compatibility, setCompatibility] = useState('');
 
-  // Image Upload state (From Device + URL option)
-  const [imageUrl, setImageUrl] = useState<string>('');
-  const [imageFileName, setImageFileName] = useState<string>('');
-  const [imageFileSize, setImageFileSize] = useState<string>('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // Multi-Image Upload state (up to 4 images, device upload + URL support)
+  interface UploadedPhoto {
+    id: string;
+    previewUrl: string;
+    file?: File;
+    name: string;
+    size?: string;
+  }
+
+  const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
+  const [useUrlMode, setUseUrlMode] = useState<boolean>(false);
+  const [customUrlInput, setCustomUrlInput] = useState<string>('');
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [useUrlMode, setUseUrlMode] = useState<boolean>(false);
 
   // Campus & Handover Details
   const defaultCampus = selectedCampus !== 'All Campuses' ? selectedCampus : (campuses.find(c => c !== 'All Campuses') || 'IIT Delhi - Main Campus');
@@ -114,18 +121,35 @@ export const SellPage: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Device File Upload Handler with Guardrail validation
-  const processFile = (file: File) => {
-    const fileCheck = validateImageFile(file);
-    if (!fileCheck.isValid) {
-      setErrors((prev) => ({ ...prev, image: fileCheck.reason || 'Invalid image file.' }));
+  const processFiles = (fileList: FileList | File[]) => {
+    const filesArray = Array.from(fileList);
+    if (filesArray.length === 0) return;
+
+    if (uploadedPhotos.length + filesArray.length > 4) {
+      setErrors((prev) => ({
+        ...prev,
+        image: `You can upload up to 4 photos per listing. Only ${4 - uploadedPhotos.length} more allowed.`,
+      }));
       return;
     }
 
-    setSelectedFile(file);
-    const objectUrl = URL.createObjectURL(file);
-    setImageUrl(objectUrl);
-    setImageFileName(file.name);
-    setImageFileSize(`${(file.size / (1024 * 1024)).toFixed(2)} MB`);
+    const newPhotos: UploadedPhoto[] = [];
+    for (const file of filesArray) {
+      const fileCheck = validateImageFile(file);
+      if (!fileCheck.isValid) {
+        setErrors((prev) => ({ ...prev, image: fileCheck.reason || 'Invalid image file.' }));
+        return;
+      }
+      newPhotos.push({
+        id: `img-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        previewUrl: URL.createObjectURL(file),
+        file,
+        name: file.name,
+        size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+      });
+    }
+
+    setUploadedPhotos((prev) => [...prev, ...newPhotos]);
     setErrors((prev) => {
       const newErrs = { ...prev };
       delete newErrs.image;
@@ -134,18 +158,21 @@ export const SellPage: React.FC = () => {
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processFile(file);
+    const files = e.target.files;
+    if (files) {
+      processFiles(files);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processFile(file);
+    const files = e.dataTransfer.files;
+    if (files) {
+      processFiles(files);
     }
   };
 
@@ -159,13 +186,41 @@ export const SellPage: React.FC = () => {
     setIsDragging(false);
   };
 
-  const handleRemoveImage = () => {
-    setImageUrl('');
-    setImageFileName('');
-    setImageFileSize('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  const handleRemovePhoto = (index: number) => {
+    setUploadedPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSetCoverPhoto = (index: number) => {
+    if (index === 0) return;
+    setUploadedPhotos((prev) => {
+      const copy = [...prev];
+      const [item] = copy.splice(index, 1);
+      copy.unshift(item);
+      return copy;
+    });
+  };
+
+  const handleAddUrlPhoto = () => {
+    const trimmed = customUrlInput.trim();
+    if (!trimmed) return;
+    if (uploadedPhotos.length >= 4) {
+      setErrors((prev) => ({ ...prev, image: 'Maximum 4 photos allowed.' }));
+      return;
     }
+    setUploadedPhotos((prev) => [
+      ...prev,
+      {
+        id: `url-${Date.now()}`,
+        previewUrl: trimmed,
+        name: 'External Image',
+      },
+    ]);
+    setCustomUrlInput('');
+    setErrors((prev) => {
+      const newErrs = { ...prev };
+      delete newErrs.image;
+      return newErrs;
+    });
   };
 
   const handleInlineAddCampus = (e: React.FormEvent) => {
@@ -232,7 +287,9 @@ export const SellPage: React.FC = () => {
 
   const validateStep3 = () => {
     const errs: Record<string, string> = {};
-    if (!imageUrl) errs.image = 'Please upload a product photo from your device or provide a link.';
+    if (uploadedPhotos.length === 0) {
+      errs.image = 'Please upload at least one product photo from your device or provide a valid link.';
+    }
     if (!hostel.trim()) errs.hostel = 'Enter your hostel or residential wing.';
     if (!pickupLocation.trim()) errs.pickup = 'Specify a preferred meetup spot.';
     if (!sellerName.trim()) errs.name = 'Enter your student display name.';
@@ -259,12 +316,26 @@ export const SellPage: React.FC = () => {
       return;
     }
 
+    if (!isEmailVerified) {
+      openAuthModal('verify');
+      return;
+    }
+
     setIsPublishing(true);
 
     try {
-      let finalImageUrl = imageUrl;
-      if (selectedFile) {
-        finalImageUrl = await uploadProductImage(selectedFile, user.id);
+      const finalImageUrls: string[] = [];
+      for (const photo of uploadedPhotos) {
+        if (photo.file) {
+          const uploadedUrl = await uploadProductImage(photo.file, user.id);
+          finalImageUrls.push(uploadedUrl);
+        } else if (photo.previewUrl) {
+          finalImageUrls.push(photo.previewUrl);
+        }
+      }
+
+      if (finalImageUrls.length === 0) {
+        finalImageUrls.push('https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80');
       }
 
       const tags = tagsInput
@@ -324,7 +395,7 @@ export const SellPage: React.FC = () => {
         originalPrice: originalPrice ? Number(originalPrice) : undefined,
         category,
         condition,
-        images: [finalImageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
+        images: finalImageUrls,
         campus,
         pickupLocation: pickupLocation.trim(),
         tags: tags.length ? tags : ['CampusDeal', 'StudentVerified'],
@@ -371,7 +442,7 @@ export const SellPage: React.FC = () => {
     expiresAt: get21DayExpiryIso(),
     courseCode: courseCode ? courseCode.toUpperCase() : undefined,
     semester: semester || undefined,
-    images: [imageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
+    images: uploadedPhotos.length > 0 ? uploadedPhotos.map((p) => p.previewUrl) : ['https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80'],
     campus,
     pickupLocation: pickupLocation || 'Campus Hub',
     tags: tagsInput.split(',').filter(Boolean),
@@ -396,7 +467,7 @@ export const SellPage: React.FC = () => {
     originalPrice,
     category,
     condition,
-    imageUrl,
+    uploadedPhotos,
     campus,
     pickupLocation,
     tagsInput,
@@ -466,7 +537,8 @@ export const SellPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] py-10">
+    <EmailVerificationGuard featureName="listing and selling items">
+      <div className="min-h-screen bg-[#F8FAFC] py-10">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center max-w-xl mx-auto mb-8">
@@ -899,23 +971,24 @@ export const SellPage: React.FC = () => {
                 <p className="text-xs text-slate-500">Upload a real product photo from your device and designate your college handover point.</p>
               </div>
 
-              {/* Device Photo Upload Section */}
+              {/* Multi-Photo Upload Section */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-xs font-bold text-slate-800">
-                    Product Photo <span className="text-red-500">*</span>
+                    Product Photos ({uploadedPhotos.length}/4) <span className="text-red-500">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => setUseUrlMode(!useUrlMode)}
                     className="text-xs text-emerald-700 hover:text-emerald-900 font-medium underline cursor-pointer"
                   >
-                    {useUrlMode ? '← Upload from Device instead' : 'Or enter an image URL'}
+                    {useUrlMode ? '← Upload from Device instead' : 'Or add via image URL'}
                   </button>
                 </div>
 
                 <input
                   type="file"
+                  multiple
                   ref={fileInputRef}
                   accept="image/jpeg,image/png,image/webp,image/jpg"
                   onChange={handleFileInputChange}
@@ -924,7 +997,7 @@ export const SellPage: React.FC = () => {
 
                 {!useUrlMode ? (
                   <div>
-                    {!imageUrl ? (
+                    {uploadedPhotos.length === 0 ? (
                       <div
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -940,10 +1013,10 @@ export const SellPage: React.FC = () => {
                           <Upload className="w-6 h-6 text-emerald-700" />
                         </div>
                         <h4 className="text-sm font-bold text-slate-900 mb-1">
-                          Click to Add Photo from Device
+                          Click to Add Photos from Device
                         </h4>
                         <p className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                          Max 8MB. Accepted formats: JPG, PNG, WEBP.
+                          Upload up to 4 photos (Max 8MB each: JPG, PNG, WEBP). First photo will be your cover image.
                         </p>
                         <button
                           type="button"
@@ -954,61 +1027,109 @@ export const SellPage: React.FC = () => {
                           className="px-5 py-2 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-bold rounded-full shadow-xs inline-flex items-center gap-2 cursor-pointer"
                         >
                           <Camera className="w-4 h-4 text-[#22C55E]" />
-                          <span>Choose Photo from Device</span>
+                          <span>Choose Photos</span>
                         </button>
                       </div>
                     ) : (
-                      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col sm:flex-row items-center gap-5">
-                        <div className="relative w-36 h-36 rounded-xl overflow-hidden bg-white border border-slate-200 shrink-0 shadow-xs">
-                          <img
-                            src={imageUrl}
-                            alt="Preview"
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="flex-1 text-center sm:text-left space-y-2">
-                          <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs font-bold text-emerald-800">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>Photo successfully selected from device</span>
-                          </div>
-                          {imageFileName && (
-                            <p className="text-xs text-slate-600 font-medium truncate max-w-sm">
-                              {imageFileName} {imageFileSize && `(${imageFileSize})`}
-                            </p>
-                          )}
-                          <div className="flex items-center justify-center sm:justify-start gap-3 pt-2">
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {uploadedPhotos.map((photo, index) => (
+                            <div
+                              key={photo.id}
+                              className={`relative group rounded-2xl overflow-hidden border-2 bg-slate-50 shadow-xs aspect-square ${
+                                index === 0 ? 'border-emerald-600 ring-2 ring-emerald-500/20' : 'border-slate-200'
+                              }`}
+                            >
+                              <img
+                                src={photo.previewUrl}
+                                alt={`Product thumbnail ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+
+                              {/* Cover Badge */}
+                              {index === 0 && (
+                                <span className="absolute top-2 left-2 bg-[#064E3B] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-[#22C55E]" />
+                                  <span>Cover Photo</span>
+                                </span>
+                              )}
+
+                              {/* Actions overlay */}
+                              <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2 text-white">
+                                {index !== 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetCoverPhoto(index)}
+                                    className="px-2 py-1 bg-white/90 hover:bg-white text-slate-800 text-[10px] font-bold rounded-md shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    Set as Cover
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePhoto(index)}
+                                  className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-full transition-colors cursor-pointer"
+                                  aria-label="Delete image"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+
+                          {uploadedPhotos.length < 4 && (
                             <button
                               type="button"
                               onClick={() => fileInputRef.current?.click()}
-                              className="px-4 py-1.5 bg-white border border-slate-300 hover:border-emerald-400 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs hover:bg-slate-50 cursor-pointer"
+                              className="border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/50 rounded-2xl flex flex-col items-center justify-center p-4 text-slate-500 hover:text-emerald-700 transition-all aspect-square cursor-pointer"
                             >
-                              Replace Photo
+                              <Plus className="w-6 h-6 mb-1" />
+                              <span className="text-[11px] font-bold">Add Photo</span>
+                              <span className="text-[10px] text-slate-400">({4 - uploadedPhotos.length} left)</span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={handleRemoveImage}
-                              className="px-3 py-1.5 text-red-600 hover:bg-red-50 text-xs font-semibold rounded-lg flex items-center gap-1 cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Remove</span>
-                            </button>
-                          </div>
+                          )}
                         </div>
+
+                        <p className="text-[11px] text-slate-500">
+                          Hover over any image to set it as Cover or delete it.
+                        </p>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <input
-                      type="url"
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://images.unsplash.com/photo-..."
-                      className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#15803D]"
-                    />
-                    {imageUrl && (
-                      <div className="w-24 h-24 rounded-lg overflow-hidden border border-slate-200">
-                        <img src={imageUrl} alt="preview" className="w-full h-full object-cover" />
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={customUrlInput}
+                        onChange={(e) => setCustomUrlInput(e.target.value)}
+                        placeholder="Paste image link: https://..."
+                        className="flex-1 px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-[#15803D]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddUrlPhoto}
+                        disabled={uploadedPhotos.length >= 4}
+                        className="px-4 py-2 bg-[#064E3B] text-white text-xs font-bold rounded-xl hover:bg-[#15803D] transition-colors disabled:opacity-50"
+                      >
+                        Add Link
+                      </button>
+                    </div>
+
+                    {uploadedPhotos.length > 0 && (
+                      <div className="grid grid-cols-4 gap-2 pt-2">
+                        {uploadedPhotos.map((p, idx) => (
+                          <div key={p.id} className="relative rounded-lg overflow-hidden border border-slate-200 aspect-square">
+                            <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePhoto(idx)}
+                              className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-full hover:bg-red-600"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1253,7 +1374,8 @@ export const SellPage: React.FC = () => {
         </div>
       </div>
     </div>
-  );
+  </EmailVerificationGuard>
+);
 };
 
 export default SellPage;

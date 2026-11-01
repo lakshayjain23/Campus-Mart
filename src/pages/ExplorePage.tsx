@@ -35,7 +35,8 @@ export const ExplorePage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'available' | 'all' | 'reserved' | 'sold'>('available');
   const [searchTerm, setSearchTerm] = useState<string>(initialSearch);
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'popular'>(initialSort);
-  const [maxPrice, setMaxPrice] = useState<number>(6000);
+  const [minPrice, setMinPrice] = useState<number>(0);
+  const [maxPrice, setMaxPrice] = useState<number>(10000);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [mobileFilterOpen, setMobileFilterOpen] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState<number>(8);
@@ -56,7 +57,8 @@ export const ExplorePage: React.FC = () => {
     setStatusFilter('available');
     setSearchTerm('');
     setGlobalSearch('');
-    setMaxPrice(6000);
+    setMinPrice(0);
+    setMaxPrice(10000);
     setSortBy('newest');
     setSearchParams({});
   };
@@ -128,8 +130,8 @@ export const ExplorePage: React.FC = () => {
         return false;
       }
 
-      // Price filter
-      if (product.price > maxPrice) {
+      // Price filter (Min & Max bounds)
+      if (product.price < minPrice || product.price > maxPrice) {
         return false;
       }
 
@@ -140,7 +142,7 @@ export const ExplorePage: React.FC = () => {
       if (sortBy === 'popular') return (b.seller.reviewsCount || 0) - (a.seller.reviewsCount || 0);
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [products, searchTerm, selectedCampus, categoryFilter, conditionFilter, statusFilter, maxPrice, sortBy]);
+  }, [products, searchTerm, selectedCampus, categoryFilter, conditionFilter, statusFilter, minPrice, maxPrice, sortBy]);
 
   const displayedProducts = filteredProducts.slice(0, visibleCount);
   const hasMore = visibleCount < filteredProducts.length;
@@ -153,7 +155,13 @@ export const ExplorePage: React.FC = () => {
     { label: 'Student Made', value: 'student_created' },
   ];
 
-  const hasActiveFilters = categoryFilter !== 'All' || conditionFilter !== 'all' || statusFilter !== 'available' || maxPrice < 6000 || searchTerm !== '';
+  const hasActiveFilters =
+    categoryFilter !== 'All' ||
+    conditionFilter !== 'all' ||
+    statusFilter !== 'available' ||
+    minPrice > 0 ||
+    maxPrice < 10000 ||
+    searchTerm !== '';
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] py-8">
@@ -359,23 +367,48 @@ export const ExplorePage: React.FC = () => {
 
             {/* Price Range Filter */}
             <div className="pt-4 border-t border-slate-100">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-800 mb-2">
-                <span>Max Price:</span>
-                <span className="text-[#064E3B]">₹{maxPrice.toLocaleString('en-IN')}</span>
+              <span className="block text-xs font-bold text-slate-800 mb-2">
+                Price Range (₹ INR)
+              </span>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-0.5">Min (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={maxPrice}
+                    step={50}
+                    value={minPrice}
+                    onChange={(e) => setMinPrice(Math.max(0, Number(e.target.value)))}
+                    className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-[#15803D]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-0.5">Max (₹)</label>
+                  <input
+                    type="number"
+                    min={minPrice}
+                    max={25000}
+                    step={100}
+                    value={maxPrice}
+                    onChange={(e) => setMaxPrice(Math.max(minPrice, Number(e.target.value)))}
+                    className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-[#15803D]"
+                  />
+                </div>
               </div>
               <input
                 type="range"
-                min={200}
-                max={6000}
+                min={0}
+                max={10000}
                 step={100}
                 value={maxPrice}
                 onChange={(e) => setMaxPrice(Number(e.target.value))}
                 className="w-full accent-[#15803D] cursor-pointer"
               />
-              <div className="flex justify-between text-[11px] text-slate-400 mt-1">
-                <span>₹200</span>
-                <span>₹3,000</span>
-                <span>₹6,000+</span>
+              <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                <span>₹0</span>
+                <span>₹5,000</span>
+                <span>₹10,000+</span>
               </div>
             </div>
 
@@ -387,28 +420,28 @@ export const ExplorePage: React.FC = () => {
               <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setMaxPrice(500)}
+                  onClick={() => { setMinPrice(0); setMaxPrice(500); }}
                   className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Under ₹500
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMaxPrice(1000)}
+                  onClick={() => { setMinPrice(0); setMaxPrice(1000); }}
                   className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Under ₹1,000
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMaxPrice(2500)}
+                  onClick={() => { setMinPrice(500); setMaxPrice(2500); }}
                   className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
-                  Under ₹2,500
+                  ₹500 – ₹2,500
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMaxPrice(6000)}
+                  onClick={() => { setMinPrice(0); setMaxPrice(10000); }}
                   className="px-2 py-1 text-xs bg-slate-50 hover:bg-emerald-50 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
                 >
                   Any Budget
@@ -441,10 +474,16 @@ export const ExplorePage: React.FC = () => {
                     <X className="w-3 h-3 cursor-pointer" onClick={() => setConditionFilter('all')} />
                   </span>
                 )}
-                {maxPrice < 6000 && (
+                {(minPrice > 0 || maxPrice < 10000) && (
                   <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md text-emerald-800 border border-emerald-200 font-medium">
-                    Under ₹{maxPrice}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => setMaxPrice(6000)} />
+                    Price: ₹{minPrice.toLocaleString('en-IN')} – ₹{maxPrice.toLocaleString('en-IN')}
+                    <X
+                      className="w-3 h-3 cursor-pointer"
+                      onClick={() => {
+                        setMinPrice(0);
+                        setMaxPrice(10000);
+                      }}
+                    />
                   </span>
                 )}
                 {searchTerm && (
@@ -573,12 +612,34 @@ export const ExplorePage: React.FC = () => {
               {/* Price */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Max Price: ₹{maxPrice}
+                  Price: ₹{minPrice} – ₹{maxPrice}
                 </label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={maxPrice}
+                    step={50}
+                    value={minPrice}
+                    onChange={(e) => setMinPrice(Math.max(0, Number(e.target.value)))}
+                    placeholder="Min ₹"
+                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded-lg"
+                  />
+                  <input
+                    type="number"
+                    min={minPrice}
+                    max={25000}
+                    step={100}
+                    value={maxPrice}
+                    onChange={(e) => setMaxPrice(Math.max(minPrice, Number(e.target.value)))}
+                    placeholder="Max ₹"
+                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded-lg"
+                  />
+                </div>
                 <input
                   type="range"
-                  min={200}
-                  max={6000}
+                  min={0}
+                  max={10000}
                   step={100}
                   value={maxPrice}
                   onChange={(e) => setMaxPrice(Number(e.target.value))}

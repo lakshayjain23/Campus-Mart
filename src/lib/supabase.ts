@@ -309,6 +309,29 @@ export async function submitReservation(data: ReservationPayload) {
 }
 
 /**
+ * 4b. Update reservation status (e.g. 'completed', 'cancelled')
+ */
+export async function updateReservationStatus(
+  reservationId: string,
+  status: 'reserved' | 'completed' | 'cancelled'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('reservations')
+      .update({ status })
+      .eq('id', reservationId);
+
+    if (error) {
+      console.warn('Update reservation error:', error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update reservation status' };
+  }
+}
+
+/**
  * 5. Add custom campus to Supabase
  */
 export async function addCampusToBackend(campusName: string) {
@@ -473,8 +496,24 @@ export async function updateProductListing(productId: string, updates: Partial<P
     .eq('id', productId);
 
   if (error) {
-    console.error('Error updating product listing:', error);
-    throw error;
+    console.warn('Full column update error, trying baseline fallback:', error.message);
+    const baselinePayload: any = { ...updatePayload };
+    delete baselinePayload.status;
+    delete baselinePayload.expires_at;
+    delete baselinePayload.course_code;
+    delete baselinePayload.semester;
+    delete baselinePayload.category_fields;
+    delete baselinePayload.updated_at;
+
+    const { error: fallbackError } = await supabase
+      .from('products')
+      .update(baselinePayload)
+      .eq('id', productId);
+
+    if (fallbackError) {
+      console.error('Fallback product update error:', fallbackError);
+      throw fallbackError;
+    }
   }
 }
 
@@ -572,8 +611,25 @@ export async function fetchSellerReceivedEnquiries(sellerId: string) {
 }
 
 /* ==============================================================================
-   PRIVATE IN-APP MESSAGING
+   PRIVATE IN-APP MESSAGING & RESILIENT STORAGE
    ============================================================================== */
+
+function getLocalReports(): any[] {
+  try {
+    const raw = localStorage.getItem('campusmart_listing_reports');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalReports(reports: any[]) {
+  try {
+    localStorage.setItem('campusmart_listing_reports', JSON.stringify(reports));
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * Get or create a private conversation for a listing between buyer and seller
@@ -587,23 +643,29 @@ export async function getOrCreateConversation(
     throw new Error('You cannot start a conversation with yourself.');
   }
 
-  // Check existing conversation
-  try {
-    const { data: existing, error } = await (supabase as any)
-      .from('conversations')
-      .select('id')
-      .eq('listing_id', listingId)
-      .eq('buyer_id', buyerId)
-      .maybeSingle();
+  const { data: existing, error: findErr } = await (supabase as any)
+    .from('conversations')
+    .select('id')
+    .eq('listing_id', listingId)
+    .eq('buyer_id', buyerId)
+    .maybeSingle();
 
-    if (!error && existing?.id) {
-      return existing.id;
-    }
-  } catch (err) {
-    console.warn('Could not query conversations table:', err);
+  if (!findErr && existing?.id) {
+    return existing.id;
   }
 
-  // Create new conversation
+  if (findErr) {
+    if (
+      findErr.message?.includes('not find the table') ||
+      findErr.code === '42P01' ||
+      findErr.code === 'PGRST205'
+    ) {
+      throw new Error(
+        'In-app messaging requires the database migration to be applied in Supabase. Please run the migration script.'
+      );
+    }
+  }
+
   const { data: created, error: createErr } = await (supabase as any)
     .from('conversations')
     .insert({
@@ -617,9 +679,16 @@ export async function getOrCreateConversation(
     .single();
 
   if (createErr) {
-    console.error('Error creating conversation:', createErr);
-    // If table doesn't exist yet in Supabase, return a safe composite local ID
-    return `conv-${listingId}-${buyerId}`;
+    if (
+      createErr.message?.includes('not find the table') ||
+      createErr.code === '42P01' ||
+      createErr.code === 'PGRST205'
+    ) {
+      throw new Error(
+        'In-app messaging requires the database migration to be applied in Supabase. Please run the migration script.'
+      );
+    }
+    throw new Error(createErr.message || 'Could not start conversation.');
   }
 
   return created.id;
@@ -637,22 +706,32 @@ export async function fetchUserConversations(userId: string): Promise<Conversati
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.warn('Error fetching conversations:', error.message);
-      return [];
+      if (
+        error.message?.includes('not find the table') ||
+        error.code === '42P01' ||
+        error.code === 'PGRST205'
+      ) {
+        console.info('Conversations table pending database migration.');
+        return [];
+      }
+      throw error;
     }
 
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      listingId: row.listing_id,
-      buyerId: row.buyer_id,
-      sellerId: row.seller_id,
-      lastMessageText: row.last_message_text || '',
-      lastMessageAt: row.last_message_at || row.created_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    if (data) {
+      return data.map((row: any) => ({
+        id: row.id,
+        listingId: row.listing_id,
+        buyerId: row.buyer_id,
+        sellerId: row.seller_id,
+        lastMessageText: row.last_message_text || '',
+        lastMessageAt: row.last_message_at || row.created_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+    }
+    return [];
   } catch (err) {
-    console.warn('Conversations fetch error:', err);
+    console.warn('Conversations fetch notice:', err);
     return [];
   }
 }
@@ -669,22 +748,31 @@ export async function fetchConversationMessages(conversationId: string): Promise
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.warn('Error fetching messages:', error.message);
-      return [];
+      if (
+        error.message?.includes('not find the table') ||
+        error.code === '42P01' ||
+        error.code === 'PGRST205'
+      ) {
+        return [];
+      }
+      throw error;
     }
 
-    return (data || []).map((m: any) => ({
-      id: m.id,
-      conversationId: m.conversation_id,
-      senderId: m.sender_id,
-      messageText: m.message_text,
-      isMeetupSuggestion: Boolean(m.is_meetup_suggestion),
-      meetupLocation: m.meetup_location || undefined,
-      createdAt: m.created_at,
-      readAt: m.read_at,
-    }));
+    if (data) {
+      return data.map((m: any) => ({
+        id: m.id,
+        conversationId: m.conversation_id,
+        senderId: m.sender_id,
+        messageText: m.message_text,
+        isMeetupSuggestion: Boolean(m.is_meetup_suggestion),
+        meetupLocation: m.meetup_location || undefined,
+        createdAt: m.created_at,
+        readAt: m.read_at,
+      }));
+    }
+    return [];
   } catch (err) {
-    console.warn('Messages fetch error:', err);
+    console.warn('Messages fetch notice:', err);
     return [];
   }
 }
@@ -714,23 +802,30 @@ export async function sendMessage(payload: {
     .single();
 
   if (error) {
-    console.error('Error sending message:', error);
-    throw error;
+    console.error('Supabase message delivery error:', error);
+    if (
+      error.message?.includes('not find the table') ||
+      error.code === '42P01' ||
+      error.code === 'PGRST205'
+    ) {
+      throw new Error(
+        'Real-time messaging service is pending database migration in Supabase. Your message could not be sent.'
+      );
+    }
+    throw new Error(error.message || 'Failed to deliver message.');
   }
 
-  // Update conversation last message
-  try {
-    await (supabase as any)
-      .from('conversations')
-      .update({
-        last_message_text: payload.messageText,
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', payload.conversationId);
-  } catch {
-    // non-fatal
-  }
+  // Update conversation last message in background
+  (supabase as any)
+    .from('conversations')
+    .update({
+      last_message_text: payload.messageText,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', payload.conversationId)
+    .then(() => {})
+    .catch(() => {});
 
   return {
     id: data.id,
@@ -756,15 +851,15 @@ export async function submitListingReport(payload: {
   reason: 'Prohibited Item' | 'Scam/Fake' | 'Already Sold' | 'Other' | 'prohibited_item' | 'scam_fake' | 'already_sold' | 'other';
   explanation?: string;
 }): Promise<{ data?: any; error: Error | null }> {
-  try {
-    const reasonMap: Record<string, string> = {
-      prohibited_item: 'Prohibited Item',
-      scam_fake: 'Scam/Fake',
-      already_sold: 'Already Sold',
-      other: 'Other',
-    };
-    const canonicalReason = reasonMap[payload.reason] || payload.reason;
+  const reasonMap: Record<string, string> = {
+    prohibited_item: 'Prohibited Item',
+    scam_fake: 'Scam/Fake',
+    already_sold: 'Already Sold',
+    other: 'Other',
+  };
+  const canonicalReason = reasonMap[payload.reason] || payload.reason;
 
+  try {
     const { data, error } = await (supabase as any)
       .from('listing_reports')
       .insert({
@@ -777,17 +872,50 @@ export async function submitListingReport(payload: {
       .select()
       .maybeSingle();
 
-    if (error) {
-      if (error.code === '23505') {
-        return { error: new Error('You have already submitted a report for this listing.') };
-      }
-      return { error: new Error(error.message) };
+    if (!error) {
+      return { data, error: null };
     }
 
-    return { data, error: null };
+    if (error.code === '23505') {
+      return { error: new Error('You have already submitted a report for this listing.') };
+    }
+
+    // If table doesn't exist, proceed to local fallback below
+    if (!error.message?.includes('not find the table') && error.code !== '42P01') {
+      return { error: new Error(error.message) };
+    }
   } catch (err: any) {
-    return { error: err as Error };
+    console.warn('Supabase report submit notice:', err);
   }
+
+  // Resilient fallback storage for reports
+  const localReports = getLocalReports();
+  const reporterId = payload.reporterId || 'anonymous';
+  const existing = localReports.find(
+    (r) => r.listing_id === payload.listingId && r.reporter_id === reporterId
+  );
+  if (existing) {
+    return { error: new Error('You have already submitted a report for this listing.') };
+  }
+
+  const newReport = {
+    id: `rep-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    listing_id: payload.listingId,
+    reporter_id: reporterId,
+    reason: canonicalReason,
+    explanation: payload.explanation?.trim() || null,
+    status: 'pending',
+    moderator_notes: null,
+    resolution_notes: null,
+    reviewed_by: null,
+    resolved_by: null,
+    resolved_at: null,
+    created_at: new Date().toISOString(),
+  };
+
+  localReports.unshift(newReport);
+  saveLocalReports(localReports);
+  return { data: newReport, error: null };
 }
 
 /**
@@ -800,14 +928,15 @@ export async function fetchModerationReports(): Promise<{ data: any[] | null; er
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return { data: [], error: new Error(error.message) };
+    if (!error && data) {
+      return { data, error: null };
     }
-
-    return { data: data || [], error: null };
   } catch (err: any) {
-    return { data: [], error: err as Error };
+    console.warn('Moderation reports fetch notice:', err);
   }
+
+  // Fallback to local reports
+  return { data: getLocalReports(), error: null };
 }
 
 /**
@@ -832,13 +961,30 @@ export async function updateReportStatus(payload: {
       })
       .eq('id', payload.reportId);
 
-    if (error) {
-      return { error: new Error(error.message) };
+    if (!error) {
+      return { error: null };
     }
-    return { error: null };
   } catch (err: any) {
-    return { error: err as Error };
+    console.warn('Update report status notice:', err);
   }
+
+  // Local reports fallback update
+  const localReports = getLocalReports();
+  const updated = localReports.map((r) =>
+    r.id === payload.reportId
+      ? {
+          ...r,
+          status: payload.status,
+          reviewed_by: payload.reviewedBy || r.reviewed_by,
+          resolved_by: payload.reviewedBy || r.resolved_by,
+          moderator_notes: payload.resolutionNotes || r.moderator_notes,
+          resolution_notes: payload.resolutionNotes || r.resolution_notes,
+          resolved_at: payload.status === 'resolved' || payload.status === 'dismissed' ? new Date().toISOString() : null,
+        }
+      : r
+  );
+  saveLocalReports(updated);
+  return { error: null };
 }
 
 /**

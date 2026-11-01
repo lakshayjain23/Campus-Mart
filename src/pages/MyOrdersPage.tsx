@@ -6,17 +6,49 @@ import {
   Calendar,
   MessageSquare,
   Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { fetchUserReservations, fetchUserSentEnquiries } from '../lib/supabase';
+import {
+  fetchUserReservations,
+  fetchUserSentEnquiries,
+  updateReservationStatus,
+} from '../lib/supabase';
 import { formatPriceINR } from '../lib/utils';
+import { EmailVerificationGuard } from '../components/EmailVerificationGuard';
 
 export const MyOrdersPage: React.FC = () => {
-  const { user, openAuthModal } = useAuth();
+  const { user } = useAuth();
   const [reservations, setReservations] = useState<any[]>([]);
   const [enquiries, setEnquiries] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(user));
   const [activeTab, setActiveTab] = useState<'reservations' | 'enquiries'>('reservations');
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  const handleUpdateStatus = async (resId: string, newStatus: 'completed' | 'cancelled') => {
+    if (newStatus === 'cancelled' && !window.confirm('Are you sure you want to cancel this campus reservation?')) {
+      return;
+    }
+    setUpdatingId(resId);
+    setActionFeedback(null);
+    try {
+      const res = await updateReservationStatus(resId, newStatus);
+      if (res.success) {
+        setReservations((prev) =>
+          prev.map((r) => (r.id === resId ? { ...r, status: newStatus } : r))
+        );
+        setActionFeedback(`Reservation successfully marked as ${newStatus}.`);
+        setTimeout(() => setActionFeedback(null), 4000);
+      } else {
+        alert(res.error || 'Failed to update reservation');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Error updating reservation');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -50,30 +82,9 @@ export const MyOrdersPage: React.FC = () => {
     };
   }, [user]);
 
-  if (!user) {
-    return (
-      <div className="min-h-[70vh] bg-[#F8FAFC] flex items-center justify-center p-4">
-        <div className="bg-white max-w-md w-full p-8 rounded-3xl border border-slate-200 text-center shadow-lg space-y-5">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
-            <ShoppingBag className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Your Reservations & Orders</h2>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Sign in with your student account to track your campus handovers and peer inquiries.
-          </p>
-          <button
-            onClick={() => openAuthModal('signin')}
-            className="w-full py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-bold rounded-full shadow-xs transition-colors cursor-pointer"
-          >
-            Sign In to View Orders
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#F8FAFC] py-8">
+    <EmailVerificationGuard featureName="Your Reservations & Orders">
+      <div className="min-h-screen bg-[#F8FAFC] py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
@@ -83,6 +94,18 @@ export const MyOrdersPage: React.FC = () => {
             Track your reserved campus pickups and communications with student sellers
           </p>
         </div>
+
+        {actionFeedback && (
+          <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-semibold text-emerald-800 flex items-center justify-between">
+            <span>{actionFeedback}</span>
+            <button
+              onClick={() => setActionFeedback(null)}
+              className="text-emerald-700 hover:text-emerald-900 cursor-pointer ml-3 font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex border-b border-slate-200 gap-4 mb-6">
@@ -130,8 +153,20 @@ export const MyOrdersPage: React.FC = () => {
                             <span className="text-xs font-mono font-bold text-slate-500">
                               #{res.id.slice(0, 8)}
                             </span>
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
-                              {res.status || 'Reserved for Pickup'}
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                res.status === 'completed'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : res.status === 'cancelled'
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              {res.status === 'completed'
+                                ? 'Completed / Handed Over'
+                                : res.status === 'cancelled'
+                                ? 'Cancelled'
+                                : res.status || 'Reserved for Pickup'}
                             </span>
                           </div>
                           <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
@@ -174,6 +209,30 @@ export const MyOrdersPage: React.FC = () => {
                           <strong>Pickup details:</strong> {res.pickup_slot} ({res.campus})
                         </span>
                       </div>
+
+                      {res.status !== 'completed' && res.status !== 'cancelled' && (
+                        <div className="pt-3 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 mt-3">
+                          <button
+                            onClick={() => handleUpdateStatus(res.id, 'cancelled')}
+                            disabled={updatingId === res.id}
+                            className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Cancel Reservation
+                          </button>
+                          <button
+                            onClick={() => handleUpdateStatus(res.id, 'completed')}
+                            disabled={updatingId === res.id}
+                            className="px-3 py-1.5 text-xs font-semibold text-white bg-[#064E3B] hover:bg-[#15803D] rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+                          >
+                            {updatingId === res.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            )}
+                            Mark Handover Complete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -237,5 +296,6 @@ export const MyOrdersPage: React.FC = () => {
         )}
       </div>
     </div>
+    </EmailVerificationGuard>
   );
 };

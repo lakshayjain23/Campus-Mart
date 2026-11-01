@@ -1,0 +1,20 @@
+# CampusMart robots.txt
+User-agent: *
+Allow: /
+Allow: /explore
+Allow: /safety
+Allow: /terms
+Allow: /privacy
+Allow: /contact
+
+# Disallow private and authenticated account pages from indexing
+Disallow: /dashboard
+Disallow: /messages
+Disallow: /orders
+Disallow: /cart
+Disallow: /wishlist
+Disallow: /moderation
+Disallow: /sell
+
+Sitemap: https://campusmarttt.vercel.app/sitemap.xml
+

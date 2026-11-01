@@ -535,7 +535,10 @@ async function runJourneyAudit() {
 
   // Test G.1: Vercel SPA Routing (Direct URL access)
   const https = await import('https');
-  const getHttp = (path) => new Promise(res => https.get('https://campus-mart-sandy.vercel.app' + path, r => res(r.statusCode)));
+  const getHttp = (path) => new Promise(res => {
+    const req = https.get('https://campusmarttt.vercel.app' + path, r => res(r.statusCode));
+    req.on('error', () => res(500));
+  });
 
   const exploreStatus = await getHttp('/explore');
   const sellStatus = await getHttp('/sell');

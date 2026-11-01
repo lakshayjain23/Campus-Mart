@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Eye,
   MessageSquare,
-  GraduationCap,
   Loader2,
   Clock,
   RotateCcw,
@@ -18,6 +17,7 @@ import {
   Compass,
   Laptop,
   AlertTriangle,
+  Camera,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useMarketplace } from '../context/MarketplaceContext';
@@ -28,13 +28,15 @@ import {
   deleteProductListing,
   renewProductListing,
   fetchSellerReceivedEnquiries,
+  uploadProductImage,
 } from '../lib/supabase';
-import { validateListingContent } from '../lib/guardrails';
+import { validateListingContent, validateImageFile } from '../lib/guardrails';
 import { formatPriceINR, getConditionBadge } from '../lib/utils';
 import { CATEGORIES } from '../data/mockProducts';
+import { EmailVerificationGuard } from '../components/EmailVerificationGuard';
 
 export const SellerDashboardPage: React.FC = () => {
-  const { user, profile, openAuthModal } = useAuth();
+  const { user, profile } = useAuth();
   const { selectedCampus } = useMarketplace();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -66,6 +68,11 @@ export const SellerDashboardPage: React.FC = () => {
   const [editBrand, setEditBrand] = useState('');
   const [editModel, setEditModel] = useState('');
   const [editCompatibility, setEditCompatibility] = useState('');
+
+  // Image editing state
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [newImageUrlInput, setNewImageUrlInput] = useState('');
+  const [isUploadingEditImage, setIsUploadingEditImage] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -134,7 +141,50 @@ export const SellerDashboardPage: React.FC = () => {
     setEditModel(catFields.model || '');
     setEditCompatibility(catFields.compatibility || '');
 
+    // Load existing photos
+    setEditImages(p.images && p.images.length > 0 ? [...p.images] : []);
+    setNewImageUrlInput('');
     setEditError(null);
+  };
+
+  const handleEditFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    const check = validateImageFile(file);
+    if (!check.isValid) {
+      setEditError(check.reason || 'Invalid image file.');
+      return;
+    }
+    if (editImages.length >= 4) {
+      setEditError('Maximum 4 photos allowed per listing.');
+      return;
+    }
+    setIsUploadingEditImage(true);
+    setEditError(null);
+    try {
+      const url = await uploadProductImage(file, user.id);
+      setEditImages((prev) => [...prev, url]);
+    } catch (err: any) {
+      setEditError(err.message || 'Image upload failed.');
+    } finally {
+      setIsUploadingEditImage(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAddEditImageUrl = () => {
+    const trimmed = newImageUrlInput.trim();
+    if (!trimmed) return;
+    if (editImages.length >= 4) {
+      setEditError('Maximum 4 photos allowed per listing.');
+      return;
+    }
+    setEditImages((prev) => [...prev, trimmed]);
+    setNewImageUrlInput('');
+  };
+
+  const handleRemoveEditImage = (index: number) => {
+    setEditImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -164,6 +214,10 @@ export const SellerDashboardPage: React.FC = () => {
     }
     if (!editDescription.trim() || editDescription.trim().length < 20) {
       setEditError('Description must be at least 20 characters.');
+      return;
+    }
+    if (editImages.length === 0) {
+      setEditError('Listing must have at least one product photo.');
       return;
     }
 
@@ -226,6 +280,7 @@ export const SellerDashboardPage: React.FC = () => {
         courseCode: editCourseCode ? editCourseCode.trim().toUpperCase() : undefined,
         semester: editSemester,
         categoryFields,
+        images: editImages,
       });
 
       // Update state only after confirmed success
@@ -245,6 +300,7 @@ export const SellerDashboardPage: React.FC = () => {
                 courseCode: editCourseCode ? editCourseCode.trim().toUpperCase() : undefined,
                 semester: editSemester,
                 categoryFields,
+                images: editImages,
                 updatedAt: new Date().toISOString(),
               }
             : item
@@ -364,30 +420,9 @@ export const SellerDashboardPage: React.FC = () => {
     return true;
   });
 
-  if (!user) {
-    return (
-      <div className="min-h-[70vh] bg-[#F8FAFC] flex items-center justify-center p-4">
-        <div className="bg-white max-w-md w-full p-8 rounded-3xl border border-slate-200 text-center shadow-lg space-y-5">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
-            <GraduationCap className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Seller Dashboard</h2>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Sign in with your verified campus student account to manage your listings, edit prices, renew 21-day expiries, and track handovers.
-          </p>
-          <button
-            onClick={() => openAuthModal('signin')}
-            className="w-full py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-bold rounded-full shadow-xs transition-colors cursor-pointer"
-          >
-            Sign In to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#F8FAFC] py-8">
+    <EmailVerificationGuard featureName="the Seller Dashboard">
+      <div className="min-h-screen bg-[#F8FAFC] py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Dashboard Header */}
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xs mb-8">
@@ -410,7 +445,7 @@ export const SellerDashboardPage: React.FC = () => {
                   {profile?.college || selectedCampus} • {profile?.department || 'Student'}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  {user.email}
+                  {user?.email}
                 </p>
               </div>
             </div>
@@ -813,6 +848,79 @@ export const SellerDashboardPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Product Photos Section in Editor */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Product Photos ({editImages.length}/4) <span className="text-red-500">*</span>
+                </label>
+
+                {/* Thumbnails */}
+                {editImages.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2 mb-2.5">
+                    {editImages.map((img, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
+                        <img src={img} alt="" className="w-full h-full object-cover" />
+                        {idx === 0 && (
+                          <span className="absolute top-1 left-1 bg-[#064E3B] text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs">
+                            Cover
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEditImage(idx)}
+                          className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-80 hover:opacity-100 transition-opacity"
+                          title="Remove photo"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {editImages.length < 4 && (
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <label className="w-full sm:w-auto px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs">
+                      {isUploadingEditImage ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Uploading...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Upload from Device</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/jpg"
+                        onChange={handleEditFileUpload}
+                        disabled={isUploadingEditImage}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <div className="flex w-full sm:flex-1 gap-1.5">
+                      <input
+                        type="url"
+                        value={newImageUrlInput}
+                        onChange={(e) => setNewImageUrlInput(e.target.value)}
+                        placeholder="Or paste image URL"
+                        className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-[#15803D]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddEditImageUrl}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Dynamic Category Specific Form in Editor */}
               {(editCategory === 'Course Textbooks' || editCategory === 'Books & Study Materials') && (
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2 text-xs">
@@ -1009,7 +1117,8 @@ export const SellerDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </EmailVerificationGuard>
   );
 };
 

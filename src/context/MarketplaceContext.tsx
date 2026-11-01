@@ -120,8 +120,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     let isMounted = true;
 
     if (!user) {
-      // Logged out: immediately clear client-side state
-      setWishlist([]);
       return;
     }
 
@@ -253,12 +251,24 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
+  const activeWishlist = user ? wishlist : [];
+
   const isInWishlist = (productId: string) => {
     if (!user) return false;
-    return wishlist.includes(productId);
+    return activeWishlist.includes(productId);
   };
 
   const addToCart = (product: Product, quantity = 1) => {
+    // Defense: Disallow adding sold, archived, reserved, or out-of-stock products
+    if (
+      product.status === 'sold' ||
+      product.status === 'archived' ||
+      product.status === 'reserved' ||
+      product.inStock === false
+    ) {
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
@@ -333,14 +343,14 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
-  const wishlistCount = user ? wishlist.length : 0;
+  const wishlistCount = activeWishlist.length;
   const cartTotal = cart.reduce((total, item) => total + (item.product.price * item.quantity), 0);
 
   return (
     <MarketplaceContext.Provider
       value={{
         products,
-        wishlist,
+        wishlist: activeWishlist,
         cart,
         campuses,
         selectedCampus,

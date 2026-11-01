@@ -56,10 +56,18 @@ export const ModerationPage: React.FC = () => {
   }, [isAuthorized]);
 
   useEffect(() => {
+    let isMounted = true;
     if (user && isAuthorized) {
-      loadReports();
+      fetchModerationReports().then(({ data, error }) => {
+        if (isMounted && !error && data) {
+          setReports(data);
+        }
+      });
     }
-  }, [user, isAuthorized, loadReports]);
+    return () => {
+      isMounted = false;
+    };
+  }, [user, isAuthorized]);
 
   const handleUpdateStatus = async (reportId: string, newStatus: 'under_review' | 'resolved' | 'dismissed', notes?: string) => {
     setIsProcessingId(reportId);

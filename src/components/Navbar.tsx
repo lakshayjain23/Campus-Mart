@@ -17,6 +17,8 @@ import {
   LogOut,
   MessageSquare,
   ShieldAlert,
+  AlertTriangle,
+  AlertCircle,
 } from 'lucide-react';
 import { useMarketplace } from '../context/MarketplaceContext';
 import { useAuth } from '../context/AuthContext';
@@ -33,7 +35,15 @@ export const Navbar: React.FC = () => {
     searchQuery,
     setSearchQuery,
   } = useMarketplace();
-  const { user, profile, signOut, openAuthModal } = useAuth();
+  const {
+    user,
+    profile,
+    isEmailVerified,
+    authNotification,
+    clearAuthNotification,
+    signOut,
+    openAuthModal,
+  } = useAuth();
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -93,6 +103,59 @@ export const Navbar: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
+      {/* Global Auth Notifications */}
+      {authNotification && (
+        <div
+          className={`w-full py-2 px-3 sm:px-6 text-xs font-semibold flex items-center justify-between border-b ${
+            authNotification.type === 'error'
+              ? 'bg-rose-700 text-white border-rose-800'
+              : authNotification.type === 'success'
+              ? 'bg-emerald-700 text-white border-emerald-800'
+              : 'bg-amber-600 text-white border-amber-700'
+          }`}
+        >
+          <div className="max-w-7xl mx-auto w-full flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              {authNotification.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 shrink-0 text-white" />
+              ) : (
+                <Check className="w-4 h-4 shrink-0 text-white" />
+              )}
+              <span className="truncate">{authNotification.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={clearAuthNotification}
+              className="p-1 hover:bg-white/20 rounded cursor-pointer shrink-0"
+              aria-label="Dismiss message"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Unverified Email Warning Banner */}
+      {user && !isEmailVerified && (
+        <div className="bg-amber-500 text-slate-950 py-1.5 px-3 sm:px-6 w-full border-b border-amber-600 shadow-2xs">
+          <div className="max-w-7xl mx-auto flex items-center justify-between text-xs gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0" />
+              <span className="font-semibold truncate">
+                Email unverified: please verify <span className="underline">{user.email}</span> to unlock listings, orders, and chats.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => openAuthModal('verify')}
+              className="px-2.5 py-0.5 bg-slate-950 hover:bg-slate-800 text-white text-[11px] font-bold rounded-md shrink-0 cursor-pointer transition-colors"
+            >
+              Verify Email
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Campus Location & Trust Ribbon */}
       <div className="bg-[#064E3B] text-emerald-100 py-1.5 px-3 sm:px-6 lg:px-8 w-full overflow-hidden border-b border-emerald-900/40">
         <div className="max-w-7xl mx-auto flex items-center justify-between text-[11px] sm:text-xs gap-2">
@@ -342,13 +405,36 @@ export const Navbar: React.FC = () => {
                 {profileDropdownOpen && (
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-4 py-2.5 border-b border-slate-100">
-                      <p className="text-xs font-bold text-slate-900 truncate">
-                        {profile?.full_name || 'Campus Student'}
-                      </p>
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          {profile?.full_name || 'Campus Student'}
+                        </p>
+                        {isEmailVerified ? (
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            Verified
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                            Unverified
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                       <span className="inline-block mt-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                         {profile?.college || selectedCampus.split(' - ')[0]}
                       </span>
+                      {!isEmailVerified && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProfileDropdownOpen(false);
+                            openAuthModal('verify');
+                          }}
+                          className="mt-2 w-full py-1 text-center bg-amber-500 hover:bg-amber-600 text-slate-950 text-[11px] font-bold rounded-md transition-colors cursor-pointer"
+                        >
+                          Verify Student Email →
+                        </button>
+                      )}
                     </div>
 
                     <Link
@@ -493,12 +579,35 @@ export const Navbar: React.FC = () => {
                     {profile?.full_name ? profile.full_name[0].toUpperCase() : 'S'}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-slate-900 truncate">
-                      {profile?.full_name || 'Student Account'}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {profile?.full_name || 'Student Account'}
+                      </p>
+                      {isEmailVerified ? (
+                        <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1 py-0.2 rounded">
+                          Verified
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold text-amber-900 bg-amber-200 px-1 py-0.2 rounded">
+                          Unverified
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                   </div>
                 </div>
+                {!isEmailVerified && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      openAuthModal('verify');
+                    }}
+                    className="w-full py-1.5 text-center bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Verify Email to Unlock Marketplace →
+                  </button>
+                )}
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <Link
                     to="/dashboard"

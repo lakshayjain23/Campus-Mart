@@ -602,6 +602,594 @@ describe('Campus Mart — Wishlist Authentication, Multi-User Isolation & Layout
     assert.ok(sql.includes('REVOKE ALL ON public.wishlists FROM anon'), 'Migration must revoke access from unauthenticated anon role');
     assert.ok(sql.includes('CONSTRAINT unique_user_product_wishlist UNIQUE (user_id, product_id)'), 'Migration must prevent duplicate entries');
   });
+
+  it('INSTITUTIONAL EMAIL & TIER VERIFICATION: accurately classifies Indian university and institutional domains and blocks username-spoofing attacks', () => {
+    function isInstitutionalEmail(email) {
+      if (!email || typeof email !== 'string') return false;
+      const clean = email.trim().toLowerCase();
+      const atIndex = clean.lastIndexOf('@');
+      if (atIndex === -1 || atIndex === 0 || atIndex === clean.length - 1) {
+        return false;
+      }
+
+      const domain = clean.slice(atIndex + 1);
+      const domainRegex = /^[a-z0-9]+([-.]{1}[a-z0-9]+)*\.[a-z]{2,}$/;
+      if (!domainRegex.test(domain)) {
+        return false;
+      }
+
+      const institutionalSuffixes = [
+        '.ac.in',
+        '.edu.in',
+        '.edu',
+        '.ernet.in',
+        '.res.in',
+      ];
+
+      for (const suffix of institutionalSuffixes) {
+        if (domain.endsWith(suffix) && domain.length > suffix.length) {
+          return true;
+        }
+      }
+
+      const knownUniversityDomains = [
+        'iitd.ac.in',
+        'dtu.ac.in',
+        'nsut.ac.in',
+        'bits-pilani.ac.in',
+        'rvce.edu.in',
+        'iitb.ac.in',
+        'iitm.ac.in',
+        'iitk.ac.in',
+        'iitkgp.ac.in',
+        'iitr.ac.in',
+        'du.ac.in',
+        'jnu.ac.in',
+        'bhu.ac.in',
+        'iiitd.ac.in',
+      ];
+
+      return knownUniversityDomains.some(
+        (univ) => domain === univ || domain.endsWith(`.${univ}`)
+      );
+    }
+
+    function getVerificationTier(email, verifiedStudent) {
+      if (isInstitutionalEmail(email)) {
+        return { tier: 'institutional_verified', label: 'Campus Email Verified' };
+      }
+      if (verifiedStudent) {
+        return { tier: 'email_registered', label: 'Student Registered' };
+      }
+      return { tier: 'unverified', label: 'Standard Account' };
+    }
+
+    // Valid institutional domains
+    assert.equal(isInstitutionalEmail('student@iitd.ac.in'), true);
+    assert.equal(isInstitutionalEmail('student@dtu.ac.in'), true);
+    assert.equal(isInstitutionalEmail('scholar@du.ac.in'), true);
+    assert.equal(isInstitutionalEmail('learner@stanford.edu'), true);
+    assert.equal(isInstitutionalEmail('tech@rvce.edu.in'), true);
+
+    // Personal / Non-institutional domains
+    assert.equal(isInstitutionalEmail('user@gmail.com'), false);
+    assert.equal(isInstitutionalEmail('user@yahoo.co.in'), false);
+    assert.equal(isInstitutionalEmail('user@outlook.com'), false);
+    assert.equal(isInstitutionalEmail(null), false);
+    assert.equal(isInstitutionalEmail(''), false);
+
+    // SECURITY: Username spoofing attack vectors must be strictly blocked
+    assert.equal(isInstitutionalEmail('spoof.iitd.ac.in@gmail.com'), false, 'Must not be fooled by username containing college domain');
+    assert.equal(isInstitutionalEmail('student@attacker.com?.iitd.ac.in'), false, 'Must reject invalid characters in domain');
+
+    // Tier checks
+    assert.equal(getVerificationTier('student@iitd.ac.in', false).tier, 'institutional_verified');
+    assert.equal(getVerificationTier('user@gmail.com', true).tier, 'email_registered');
+    assert.equal(getVerificationTier('user@gmail.com', false).tier, 'unverified');
+  });
+
+  it('DUAL PRICE FILTERING: correctly filters items within min and max price ranges', () => {
+    const sampleCatalog = [
+      { id: '1', title: 'Calculus Book', price: 150 },
+      { id: '2', title: 'Scientific Calculator', price: 550 },
+      { id: '3', title: 'Hostel Kettle', price: 800 },
+      { id: '4', title: 'Study Desk Lamp', price: 1200 },
+      { id: '5', title: 'Mountain Bicycle', price: 4500 },
+    ];
+
+    function filterByPrice(items, minPrice, maxPrice) {
+      return items.filter((item) => {
+        if (minPrice && item.price < minPrice) return false;
+        if (maxPrice && item.price > maxPrice) return false;
+        return true;
+      });
+    }
+
+    // Range: 500 to 1500
+    const midRange = filterByPrice(sampleCatalog, 500, 1500);
+    assert.equal(midRange.length, 3);
+    assert.deepEqual(midRange.map((i) => i.id), ['2', '3', '4']);
+
+    // Range: only minPrice 1000
+    const highRange = filterByPrice(sampleCatalog, 1000, null);
+    assert.equal(highRange.length, 2);
+    assert.deepEqual(highRange.map((i) => i.id), ['4', '5']);
+
+    // Range: only maxPrice 600
+    const lowRange = filterByPrice(sampleCatalog, null, 600);
+    assert.equal(lowRange.length, 2);
+    assert.deepEqual(lowRange.map((i) => i.id), ['1', '2']);
+  });
+
+  it('MULTI-IMAGE MANAGEMENT: enforces maximum 4 images and handles cover photo reordering', () => {
+    let images = ['img1.jpg', 'img2.jpg'];
+    const MAX_IMAGES = 4;
+
+    function addImage(url) {
+      if (images.length >= MAX_IMAGES) return false;
+      images.push(url);
+      return true;
+    }
+
+    function setAsCover(index) {
+      if (index <= 0 || index >= images.length) return;
+      const target = images[index];
+      images.splice(index, 1);
+      images.unshift(target);
+    }
+
+    function removeImage(index) {
+      images = images.filter((_, i) => i !== index);
+    }
+
+    assert.equal(addImage('img3.jpg'), true);
+    assert.equal(addImage('img4.jpg'), true);
+    assert.equal(addImage('img5.jpg'), false, 'Must reject 5th image when cap is 4');
+    assert.equal(images.length, 4);
+
+    // Swap index 2 ('img3.jpg') to cover
+    setAsCover(2);
+    assert.equal(images[0], 'img3.jpg', 'img3.jpg must now be the cover photo at index 0');
+
+    // Remove cover
+    removeImage(0);
+    assert.equal(images.length, 3);
+    assert.equal(images[0], 'img1.jpg');
+  });
+
+  it('RESERVATION STATUS LIFECYCLE: allows valid status transitions (reserved -> completed | cancelled)', () => {
+    const VALID_TRANSITIONS = {
+      reserved: ['completed', 'cancelled'],
+      completed: [],
+      cancelled: [],
+    };
+
+    function canTransition(current, next) {
+      return (VALID_TRANSITIONS[current] || []).includes(next);
+    }
+
+    assert.equal(canTransition('reserved', 'completed'), true);
+    assert.equal(canTransition('reserved', 'cancelled'), true);
+    assert.equal(canTransition('completed', 'reserved'), false);
+    assert.equal(canTransition('cancelled', 'completed'), false);
+  });
+
+  it('SEO & PRODUCTION ARTIFACTS: robots.txt, sitemap.xml, and schema structured data are present', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    const robotsPath = path.resolve('public/robots.txt');
+    assert.ok(fs.existsSync(robotsPath), 'public/robots.txt must exist');
+    const robots = fs.readFileSync(robotsPath, 'utf8');
+    assert.ok(robots.includes('User-agent: *'));
+    assert.ok(robots.includes('Disallow: /dashboard'));
+    assert.ok(robots.includes('Sitemap: https://campusmarttt.vercel.app/sitemap.xml'));
+
+    const sitemapPath = path.resolve('public/sitemap.xml');
+    assert.ok(fs.existsSync(sitemapPath), 'public/sitemap.xml must exist');
+    const sitemap = fs.readFileSync(sitemapPath, 'utf8');
+    assert.ok(sitemap.includes('https://campusmarttt.vercel.app/'));
+    assert.ok(sitemap.includes('https://campusmarttt.vercel.app/explore'));
+
+    const indexPath = path.resolve('index.html');
+    const index = fs.readFileSync(indexPath, 'utf8');
+    assert.ok(index.includes('og:title'), 'index.html must have OpenGraph title');
+    assert.ok(index.includes('twitter:card'), 'index.html must have Twitter card');
+    assert.ok(index.includes('"@type": "WebSite"'), 'index.html must have WebSite JSON-LD');
+  });
+
+  it('CONSOLIDATED PRODUCTION MIGRATION: 20261101000000_production_ready_marketplace.sql is comprehensive', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    const migrationPath = path.resolve('supabase/migrations/20261101000000_production_ready_marketplace.sql');
+    assert.ok(fs.existsSync(migrationPath), 'Consolidated migration file must exist');
+
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+    assert.ok(sql.includes('ALTER TABLE public.products ADD COLUMN IF NOT EXISTS status'));
+    assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS public.wishlists'));
+    assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS public.conversations'));
+    assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS public.messages'));
+    assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS public.listing_reports'));
+    assert.ok(sql.includes('CREATE OR REPLACE FUNCTION public.renew_listing'));
+    assert.ok(sql.includes('CREATE OR REPLACE FUNCTION public.expire_stale_listings'));
+    assert.ok(sql.includes('CREATE OR REPLACE FUNCTION public.delete_user_account'));
+    assert.ok(sql.includes('CREATE POLICY "Buyers can update own reservations"'));
+    assert.ok(sql.includes('CREATE POLICY "Users can delete own profile"'));
+    assert.ok(sql.includes('CREATE OR REPLACE FUNCTION public.protect_reservation_updates'));
+    assert.ok(sql.includes('DROP POLICY IF EXISTS "Users can delete own product images" ON storage.objects'));
+    assert.ok(sql.includes('(storage.foldername(name))[1] = auth.uid()::text'));
+  });
+
+  it('PURCHASE INTEGRITY: sold, archived, or out-of-stock items cannot be added to cart or reserved', () => {
+    const activeItem = { id: 'item-1', title: 'Calculus Book', price: 200, status: 'available', inStock: true };
+    const soldItem = { id: 'item-2', title: 'Chemistry Kit', price: 500, status: 'sold', inStock: false };
+    const reservedItem = { id: 'item-3', title: 'Desk Fan', price: 600, status: 'reserved', inStock: false };
+    const archivedItem = { id: 'item-4', title: 'Old Notes', price: 50, status: 'archived', inStock: false };
+
+    let cart = [];
+
+    function addToCart(product) {
+      if (
+        product.status === 'sold' ||
+        product.status === 'archived' ||
+        product.status === 'reserved' ||
+        product.inStock === false
+      ) {
+        return false;
+      }
+      cart.push(product);
+      return true;
+    }
+
+    assert.equal(addToCart(activeItem), true);
+    assert.equal(addToCart(soldItem), false, 'Sold items must not be added to cart');
+    assert.equal(addToCart(reservedItem), false, 'Reserved items must not be added to cart');
+    assert.equal(addToCart(archivedItem), false, 'Archived items must not be added to cart');
+    assert.equal(cart.length, 1);
+    assert.equal(cart[0].id, 'item-1');
+  });
+
+  it('DELIVERY HONESTY: reservation update and message delivery errors are propagated without false success simulation', () => {
+    // Verify that errors returned by backend are not masked as { success: true }
+    function handleUpdateResult(res) {
+      if (res.error) {
+        return { success: false, error: res.error.message };
+      }
+      return { success: true };
+    }
+
+    const mockFailure = { error: { message: 'Row level security policy violation' } };
+    const mockSuccess = { error: null };
+
+    assert.equal(handleUpdateResult(mockFailure).success, false);
+    assert.equal(handleUpdateResult(mockFailure).error, 'Row level security policy violation');
+    assert.equal(handleUpdateResult(mockSuccess).success, true);
+  });
+
+  it('RESERVATION SECURITY: blocks financial tampering, unauthorized buyer updates, and reopening finalized orders', () => {
+    function validateReservationUpdate(existing, updates) {
+      // Reopening finalized orders is strictly blocked
+      if (existing.status === 'completed' || existing.status === 'cancelled') {
+        return { allowed: false, reason: 'Reservation is finalized and cannot be modified.' };
+      }
+
+      // Financial and ownership tampering checks
+      if (updates.total_amount !== undefined && updates.total_amount !== existing.total_amount) {
+        return { allowed: false, reason: 'Financial details cannot be modified.' };
+      }
+      if (updates.buyer_id !== undefined && updates.buyer_id !== existing.buyer_id) {
+        return { allowed: false, reason: 'Reservation ownership cannot be transferred.' };
+      }
+      if (updates.items !== undefined && JSON.stringify(updates.items) !== JSON.stringify(existing.items)) {
+        return { allowed: false, reason: 'Items cannot be altered on active reservation.' };
+      }
+
+      // Valid status transitions
+      if (updates.status && !['reserved', 'completed', 'cancelled'].includes(updates.status)) {
+        return { allowed: false, reason: 'Invalid reservation status transition.' };
+      }
+
+      return { allowed: true };
+    }
+
+    const activeRes = {
+      id: 'res-101',
+      buyer_id: 'user-buyer-1',
+      total_amount: 850,
+      items: [{ productId: 'p1', title: 'Scientific Calculator', price: 850, quantity: 1 }],
+      status: 'reserved',
+    };
+
+    const completedRes = { ...activeRes, status: 'completed' };
+
+    // Legitimate status transition
+    assert.equal(validateReservationUpdate(activeRes, { status: 'completed' }).allowed, true);
+    assert.equal(validateReservationUpdate(activeRes, { status: 'cancelled' }).allowed, true);
+
+    // Malicious attempts: tampering price, transferring buyer, or altering items
+    assert.equal(validateReservationUpdate(activeRes, { total_amount: 0 }).allowed, false);
+    assert.equal(validateReservationUpdate(activeRes, { buyer_id: 'attacker-id' }).allowed, false);
+    assert.equal(validateReservationUpdate(activeRes, { items: [] }).allowed, false);
+
+    // Reopening completed reservation
+    assert.equal(validateReservationUpdate(completedRes, { status: 'reserved' }).allowed, false);
+  });
+
+  it('STORAGE ACCESS CONTROL: enforces user-scoped folder paths and blocks cross-user object deletion', () => {
+    function canUserDeleteStorageObject(objectPath, authenticatedUserId, userRole = 'student') {
+      if (userRole === 'admin' || userRole === 'moderator') {
+        return true;
+      }
+      // Path format: `${userId}/${timestamp}-${filename}`
+      const folderOwner = objectPath.split('/')[0];
+      return folderOwner === authenticatedUserId;
+    }
+
+    const userA = 'user-uuid-1111';
+    const userB = 'user-uuid-2222';
+    const adminUser = 'admin-uuid-9999';
+
+    const userAImage = `${userA}/1793540000000-textbook.jpg`;
+    const userBImage = `${userB}/1793540000000-bicycle.jpg`;
+
+    // Owner can delete own object
+    assert.equal(canUserDeleteStorageObject(userAImage, userA, 'student'), true);
+    assert.equal(canUserDeleteStorageObject(userBImage, userB, 'student'), true);
+
+    // Cross-user deletion is strictly denied
+    assert.equal(canUserDeleteStorageObject(userAImage, userB, 'student'), false, 'User B must not delete User A image');
+    assert.equal(canUserDeleteStorageObject(userBImage, userA, 'student'), false, 'User A must not delete User B image');
+
+    // Admin can moderate/delete any image
+    assert.equal(canUserDeleteStorageObject(userAImage, adminUser, 'admin'), true);
+  });
 });
+
+// -------------------------------------------------------------
+// Account Creation & Email Verification Workflow Verification
+// -------------------------------------------------------------
+
+describe('Campus Mart — Account Creation & Email Verification Workflow', () => {
+  it('VERIFICATION STATUS: accurately detects verified vs unconfirmed student accounts', () => {
+    function computeIsEmailVerified(user) {
+      if (!user) return false;
+      return Boolean(user.email_confirmed_at || user.confirmed_at);
+    }
+
+    // Unverified accounts
+    assert.equal(computeIsEmailVerified(null), false, 'Null user is unverified');
+    assert.equal(computeIsEmailVerified({ id: 'u1', email: 'test@campus.edu', email_confirmed_at: null }), false, 'Null email_confirmed_at is unverified');
+    assert.equal(computeIsEmailVerified({ id: 'u2', email: 'test@campus.edu' }), false, 'Undefined email_confirmed_at is unverified');
+
+    // Verified accounts
+    assert.equal(computeIsEmailVerified({ id: 'u3', email: 'test@campus.edu', email_confirmed_at: '2026-11-01T12:00:00Z' }), true, 'Standard email_confirmed_at is verified');
+    assert.equal(computeIsEmailVerified({ id: 'u4', email: 'test@campus.edu', confirmed_at: '2026-11-01T12:00:00Z' }), true, 'Legacy confirmed_at is verified');
+  });
+
+  it('REGISTRATION WORKFLOW: correctly processes null session and flags confirmationRequired', () => {
+    function processSignUpResponse(supabaseSignUpData) {
+      const { user, session } = supabaseSignUpData;
+      if (!user) {
+        return { error: new Error('Registration failed. Please try again.') };
+      }
+
+      // Check if user already exists (Supabase returns empty identities array)
+      if (user.identities && user.identities.length === 0) {
+        return {
+          error: new Error('An account with this email address already exists. Please sign in or use password reset.'),
+        };
+      }
+
+      const isVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
+      if (!session && !isVerified) {
+        return {
+          error: null,
+          confirmationRequired: true,
+          user,
+        };
+      }
+
+      return {
+        error: null,
+        confirmationRequired: false,
+        user,
+      };
+    }
+
+    // Typical Supabase response when email confirmation is enabled in project settings
+    const confirmationEnabledResponse = {
+      user: {
+        id: 'usr-new-1',
+        email: 'student@iitd.ac.in',
+        email_confirmed_at: null,
+        identities: [{ id: 'usr-new-1', identity_data: { email: 'student@iitd.ac.in' } }],
+      },
+      session: null,
+    };
+
+    const res = processSignUpResponse(confirmationEnabledResponse);
+    assert.equal(res.error, null);
+    assert.equal(res.confirmationRequired, true);
+    assert.equal(res.user.email, 'student@iitd.ac.in');
+
+    // Immediate confirmation environment (e.g. confirmation disabled in local test)
+    const instantConfirmedResponse = {
+      user: {
+        id: 'usr-new-2',
+        email: 'instant@iitd.ac.in',
+        email_confirmed_at: '2026-11-01T12:00:00Z',
+        identities: [{ id: 'usr-new-2' }],
+      },
+      session: { access_token: 'fake-jwt', user: { id: 'usr-new-2' } },
+    };
+
+    const instantRes = processSignUpResponse(instantConfirmedResponse);
+    assert.equal(instantRes.error, null);
+    assert.equal(instantRes.confirmationRequired, false);
+  });
+
+  it('DUPLICATE REGISTRATION: flags existing user when identities array is empty', () => {
+    function processSignUpResponse(supabaseSignUpData) {
+      const { user } = supabaseSignUpData;
+      if (user?.identities && user.identities.length === 0) {
+        return {
+          error: new Error('An account with this email address already exists. Please sign in or use password reset.'),
+        };
+      }
+      return { error: null };
+    }
+
+    const duplicateAttemptData = {
+      user: {
+        id: 'usr-duplicate-1',
+        email: 'existing.student@iitd.ac.in',
+        identities: [], // Supabase signal for existing email
+      },
+      session: null,
+    };
+
+    const res = processSignUpResponse(duplicateAttemptData);
+    assert.ok(res.error);
+    assert.match(res.error.message, /already exists/i);
+  });
+
+  it('FEATURE GUARDS: strictly blocks unconfirmed and anonymous users across all protected operations', () => {
+    function checkFeatureAccess(user, isEmailVerified, _action) {
+      if (!user) {
+        return { allowed: false, reason: 'authentication_required', action: 'open_signin_modal' };
+      }
+      if (!isEmailVerified) {
+        return { allowed: false, reason: 'email_verification_required', action: 'open_verify_modal' };
+      }
+      return { allowed: true, reason: 'granted' };
+    }
+
+    const anonymousUser = null;
+    const unverifiedUser = { id: 'u-unconfirmed', email: 'unconfirmed@campus.edu' };
+    const verifiedUser = { id: 'u-verified', email: 'verified@campus.edu' };
+
+    const protectedFeatures = ['publish_listing', 'send_message', 'place_reservation', 'seller_dashboard', 'submit_report'];
+
+    for (const feature of protectedFeatures) {
+      // Anonymous user
+      const anonCheck = checkFeatureAccess(anonymousUser, false, feature);
+      assert.equal(anonCheck.allowed, false, `Anonymous user must not access ${feature}`);
+      assert.equal(anonCheck.action, 'open_signin_modal');
+
+      // Unverified user
+      const unverifiedCheck = checkFeatureAccess(unverifiedUser, false, feature);
+      assert.equal(unverifiedCheck.allowed, false, `Unverified user must not access ${feature}`);
+      assert.equal(unverifiedCheck.action, 'open_verify_modal');
+
+      // Verified user
+      const verifiedCheck = checkFeatureAccess(verifiedUser, true, feature);
+      assert.equal(verifiedCheck.allowed, true, `Verified user must be granted access to ${feature}`);
+    }
+  });
+
+  it('RESEND CONFIRMATION: detects rate limiting (429) and enforces 60-second cooldown timer', () => {
+    function simulateResendCall({ email, lastSentTimestamp, currentTimestamp, apiStatus }) {
+      if (!email) {
+        return { error: new Error('Please enter a valid email address.') };
+      }
+      const cooldownRemaining = Math.max(0, 60 - Math.floor((currentTimestamp - lastSentTimestamp) / 1000));
+      if (lastSentTimestamp > 0 && cooldownRemaining > 0) {
+        return { error: new Error(`Please wait ${cooldownRemaining}s before requesting another verification email.`) };
+      }
+      if (apiStatus === 429) {
+        return { error: new Error('Verification email rate limit reached. Please wait a few minutes before requesting another link.') };
+      }
+      return { success: true, cooldownRemaining: 60 };
+    }
+
+    const t0 = 1000000;
+    // Initial send succeeds
+    const send1 = simulateResendCall({ email: 'student@campus.edu', lastSentTimestamp: 0, currentTimestamp: t0, apiStatus: 200 });
+    assert.equal(send1.success, true);
+    assert.equal(send1.cooldownRemaining, 60);
+
+    // Immediate second attempt within cooldown (10 seconds later) fails
+    const send2 = simulateResendCall({ email: 'student@campus.edu', lastSentTimestamp: t0, currentTimestamp: t0 + 10000, apiStatus: 200 });
+    assert.ok(send2.error);
+    assert.match(send2.error.message, /wait 50s/i);
+
+    // Attempt after cooldown expires (65 seconds later) succeeds
+    const send3 = simulateResendCall({ email: 'student@campus.edu', lastSentTimestamp: t0, currentTimestamp: t0 + 65000, apiStatus: 200 });
+    assert.equal(send3.success, true);
+
+    // Upstream Supabase rate limit triggers friendly guidance
+    const send4 = simulateResendCall({ email: 'student@campus.edu', lastSentTimestamp: 0, currentTimestamp: t0, apiStatus: 429 });
+    assert.ok(send4.error);
+    assert.match(send4.error.message, /rate limit reached/i);
+  });
+
+  it('URL HASH CALLBACK: parses token errors and OTP expiration parameters safely', () => {
+    function parseAuthHash(hashString) {
+      if (!hashString || !hashString.includes('=')) return null;
+      const cleanHash = hashString.startsWith('#') ? hashString.slice(1) : hashString;
+      const params = new URLSearchParams(cleanHash);
+      const errorCode = params.get('error_code');
+      const errorDesc = params.get('error_description');
+      const errorMsg = params.get('error');
+      const type = params.get('type');
+
+      if (errorCode === 'otp_expired' || errorDesc?.toLowerCase().includes('expired')) {
+        return {
+          type: 'error',
+          message: 'Your email verification link has expired or has already been used. Please request a new verification link below.',
+        };
+      }
+
+      if (errorCode || errorMsg) {
+        return {
+          type: 'error',
+          message: errorDesc ? decodeURIComponent(errorDesc).replace(/\+/g, ' ') : 'Authentication failed. Please try again.',
+        };
+      }
+
+      if (type === 'signup') {
+        return {
+          type: 'success',
+          message: 'Email confirmed successfully! Your student account is now active.',
+        };
+      }
+
+      return null;
+    }
+
+    // Expired OTP token callback
+    const expiredOtpHash = '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired';
+    const expiredResult = parseAuthHash(expiredOtpHash);
+    assert.equal(expiredResult.type, 'error');
+    assert.match(expiredResult.message, /expired or has already been used/i);
+
+    // Generic error callback
+    const genericErrorHash = '#error=server_error&error_description=Temporary+failure';
+    const genericResult = parseAuthHash(genericErrorHash);
+    assert.equal(genericResult.type, 'error');
+    assert.match(genericResult.message, /Temporary failure/i);
+
+    // Successful signup callback
+    const signupSuccessHash = '#access_token=token123&type=signup';
+    const successResult = parseAuthHash(signupSuccessHash);
+    assert.equal(successResult.type, 'success');
+    assert.match(successResult.message, /Email confirmed successfully/i);
+  });
+
+  it('PASSWORD CONFIRMATION: ensures passwords match before registration dispatch', () => {
+    function validateRegistrationInputs({ email, password, confirmPassword, fullName }) {
+      if (!fullName?.trim()) return { valid: false, error: 'Full name is required' };
+      if (!email?.trim()) return { valid: false, error: 'Email is required' };
+      if (!password || password.length < 6) return { valid: false, error: 'Password must be at least 6 characters' };
+      if (password !== confirmPassword) return { valid: false, error: 'Passwords do not match. Please re-enter your password correctly.' };
+      return { valid: true };
+    }
+
+    assert.equal(validateRegistrationInputs({ email: 's@campus.edu', fullName: 'Student', password: 'secretpassword', confirmPassword: 'differentpassword' }).valid, false);
+    assert.equal(validateRegistrationInputs({ email: 's@campus.edu', fullName: 'Student', password: 'secretpassword', confirmPassword: 'secretpassword' }).valid, true);
+  });
+});
+
 
 

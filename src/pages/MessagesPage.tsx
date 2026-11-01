@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useMarketplace } from '../context/MarketplaceContext';
+import { EmailVerificationGuard } from '../components/EmailVerificationGuard';
 import {
   supabase,
   fetchUserConversations,
@@ -47,7 +48,7 @@ export const MessagesPage: React.FC = () => {
   const initialListingId = searchParams.get('listingId');
   const initialSellerId = searchParams.get('sellerId');
 
-  const { user, openAuthModal } = useAuth();
+  const { user, isEmailVerified } = useAuth();
   const { products } = useMarketplace();
 
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -177,6 +178,10 @@ export const MessagesPage: React.FC = () => {
     if (e) e.preventDefault();
     const textToSend = (customText || messageInput).trim();
     if (!textToSend || !activeConversationId || !user || isSending) return;
+    if (!isEmailVerified) {
+      setSendError('Please verify your student email to send messages.');
+      return;
+    }
 
     setIsSending(true);
     setSendError(null);
@@ -205,28 +210,9 @@ export const MessagesPage: React.FC = () => {
     ? products.find((p) => p.id === activeConversation.listingId)
     : null;
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center max-w-md shadow-xs">
-          <MessageSquare className="w-12 h-12 text-[#15803D] mx-auto mb-3" />
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Student Messages</h2>
-          <p className="text-xs text-slate-500 mb-6">
-            Log in to coordinate campus meetups, chat with buyers and sellers, and ask questions about listings.
-          </p>
-          <button
-            onClick={() => openAuthModal('signin')}
-            className="px-6 py-2.5 bg-[#064E3B] hover:bg-[#15803D] text-white text-xs font-semibold rounded-full shadow-xs"
-          >
-            Sign In to View Messages
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-100 py-4 sm:py-6">
+    <EmailVerificationGuard featureName="Campus Student Chats">
+      <div className="min-h-[calc(100vh-4rem)] bg-slate-100 py-4 sm:py-6">
       <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row h-[780px]">
           {/* LEFT COLUMN: Conversation List */}
@@ -269,7 +255,7 @@ export const MessagesPage: React.FC = () => {
                 conversations.map((conv) => {
                   const p = products.find((prod) => prod.id === conv.listingId);
                   const isSelected = conv.id === activeConversationId;
-                  const isSeller = conv.sellerId === user.id;
+                  const isSeller = conv.sellerId === user?.id;
 
                   return (
                     <button
@@ -411,7 +397,7 @@ export const MessagesPage: React.FC = () => {
                     </div>
                   ) : (
                     messages.map((msg) => {
-                      const isMe = msg.senderId === user.id;
+                      const isMe = msg.senderId === user?.id;
                       const isMeetupMsg = msg.isMeetupSuggestion || msg.messageText.includes('meet at');
 
                       return (
@@ -547,6 +533,7 @@ export const MessagesPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </EmailVerificationGuard>
   );
 };
